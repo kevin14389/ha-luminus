@@ -63,6 +63,13 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 - **Reset mensuel** (00h01 le 1er du mois) et **reset annuel** (00h02 le
   1er janvier) : remettent les accumulateurs à 0 pour démarrer la nouvelle
   période.
+- **Changement de prix programmé** (vérifié chaque heure) : applique
+  automatiquement `input_number.luminus_prix_energie_ttc_prochain` à la date
+  prévue si `input_boolean.luminus_changement_prix_programme` est activé.
+- **Correction manuelle** : sur pression du bouton
+  `input_button.luminus_appliquer_correction_manuelle`, ajoute
+  `input_number.luminus_correction_manuelle` aux accumulateurs mensuel/
+  annuel puis la remet à 0.
 
 ## Aides tarifaires modifiables (à adapter quand les tarifs changent)
 
@@ -83,6 +90,10 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 | `input_number.remise_fidelite_24_mois` | Promo Luminus domiciliation | 10 % |
 | `input_boolean.luminus_remise_fidelite_active` | À activer si tu payes par domiciliation | Désactivé |
 | `input_datetime.luminus_date_debut_contrat` | Date de début de ton contrat Luminus | à ajuster |
+| `input_number.luminus_prix_energie_ttc_prochain` | Prochain prix énergie, à programmer à l'avance | 0 (inactif) |
+| `input_datetime.luminus_prix_energie_date_effet` | Date d'entrée en vigueur du prochain prix | à ajuster |
+| `input_boolean.luminus_changement_prix_programme` | Active le changement de prix programmé | Désactivé |
+| `input_number.luminus_correction_manuelle` | Montant (€) à ajouter/retirer manuellement aux totaux | 0 |
 
 ## Hypothèses et simplifications
 
@@ -124,6 +135,47 @@ qui inclut la redevance Luminus, le terme fixe GRD et le tarif prosumer) ne
 sont pas rétroactivement recalculés au prorata exact si tu changes leur
 valeur en cours de mois — l'écart est généralement minime (ce sont de petits
 montants forfaitaires annuels).
+
+### Programmer un changement de prix à l'avance (recommandé)
+
+Pour ne jamais oublier une indexation Luminus (elle doit légalement être
+annoncée avec un préavis d'au moins 1 mois pour un contrat fixe), encode-la
+dès que tu reçois le courrier :
+
+1. `input_number.luminus_prix_energie_ttc_prochain` → le nouveau prix (c€/kWh, TTC)
+2. `input_datetime.luminus_prix_energie_date_effet` → la date d'entrée en vigueur (ex. 15/09)
+3. `input_boolean.luminus_changement_prix_programme` → active-le (ON)
+
+Le système vérifie chaque heure si la date est atteinte et bascule
+`input_number.luminus_prix_energie_ttc` automatiquement ce jour-là — plus
+besoin d'y penser le jour J.
+
+### Si tu l'as quand même encodé en retard (ta question : changement le 15/09,
+encodé le 25/09)
+
+Dans ce cas précis, le mécanisme ci-dessus s'applique bien **à partir du
+moment où tu l'actives** (donc à partir du 25/09), mais **ne corrige pas
+tout seul** les 10 jours (15→24/09) déjà calculés et figés à l'ancien prix
+— ni le système "programmé", ni aucun autre mécanisme automatique ne peut
+deviner rétroactivement qu'une erreur a eu lieu.
+
+Pour rattraper ces 10 jours :
+
+1. Regarde dans l'historique de `sensor.luminus_conso_jour` (ou les
+   statistiques Énergie) le total de kWh consommés entre le 15 et le 24/09.
+2. Calcule l'écart de prix : (nouveau prix − ancien prix) en EUR/kWh
+   (`sensor.luminus_prix_kwh_ttc` divisé par 100, avant et après).
+3. Multiplie les deux : `kWh_manqués × écart_prix` = montant en euros
+   (positif si tu as sous-compté, négatif si tu as sur-compté).
+4. Entre ce montant dans `input_number.luminus_correction_manuelle`.
+5. Appuie sur `input_button.luminus_appliquer_correction_manuelle` : le
+   montant est ajouté aux totaux mensuel/annuel, puis la correction se
+   remet à 0.
+
+Cet outil reste une **estimation de suivi**, pas ta facture officielle
+(celle-ci est calculée par Luminus sur base des index réels) — mais il
+permet de garder tes totaux HA cohérents avec la réalité même en cas
+d'oubli.
 
 ## Exemple de carte Lovelace
 

@@ -178,10 +178,41 @@ input_number:
     step: 0.01
     initial: 0
 
+  # --- Changement de prix programmé à l'avance (ex. indexation Luminus
+  #     annoncée pour le 15/09 : encode-le dès que tu reçois le courrier,
+  #     il s'appliquera tout seul le bon jour). ---
+  luminus_prix_energie_ttc_prochain:
+    name: "Luminus - Prochain prix énergie programmé (TTC)"
+    icon: mdi:calendar-clock
+    unit_of_measurement: "c€/kWh"
+    min: 0
+    max: 100
+    step: 0.01
+    initial: 0
+
+  # --- Correction manuelle ponctuelle, pour rattraper un changement de
+  #     tarif que tu as encodé en retard (voir bouton "Appliquer la
+  #     correction manuelle" plus bas). Calcule-la comme :
+  #     kWh consommés pendant la période ratée × (nouveau - ancien prix,
+  #     en EUR/kWh). Peut être négative si tu as trop compté. ---
+  luminus_correction_manuelle:
+    name: "Luminus - Correction manuelle à appliquer (EUR)"
+    icon: mdi:calculator
+    unit_of_measurement: "EUR"
+    min: -1000
+    max: 1000
+    step: 0.01
+    initial: 0
+
 input_boolean:
   luminus_remise_fidelite_active:
     name: "Remise fidélité domiciliation active"
     icon: mdi:cash-check
+    initial: false
+
+  luminus_changement_prix_programme:
+    name: "Luminus - Changement de prix programmé actif"
+    icon: mdi:calendar-clock
     initial: false
 
 input_datetime:
@@ -190,6 +221,17 @@ input_datetime:
     has_date: true
     has_time: false
     initial: "2024-01-01"
+
+  luminus_prix_energie_date_effet:
+    name: "Luminus - Date d'entrée en vigueur du prochain prix"
+    has_date: true
+    has_time: false
+    initial: "2024-01-01"
+
+input_button:
+  luminus_appliquer_correction_manuelle:
+    name: "Luminus - Appliquer la correction manuelle"
+    icon: mdi:calculator-variant
 
 # =============================================================================
 # Suivi de la consommation - basé sur le capteur du compteur communicant
@@ -430,6 +472,88 @@ automation:
       - action: input_number.set_value
         target:
           entity_id: input_number.luminus_cout_accumulateur_annee
+        data:
+          value: 0
+    mode: single
+
+  - id: luminus_appliquer_changement_prix_programme
+    alias: "Luminus - Applique le changement de prix programmé"
+    description: >
+      Vérifie chaque heure si un changement de prix programmé
+      (input_boolean.luminus_changement_prix_programme) est arrivé à sa date
+      d'effet. Si oui, il remplace automatiquement le prix énergie en
+      vigueur - que la date soit dans le futur (programmée à l'avance et
+      appliquée pile le bon jour) ou déjà passée (encodée en retard : le
+      nouveau prix s'applique immédiatement à partir de maintenant, mais ne
+      corrige pas rétroactivement les jours déjà clôturés - utilise la
+      correction manuelle pour ça).
+    trigger:
+      - trigger: time_pattern
+        hours: "/1"
+      - trigger: state
+        entity_id:
+          - input_boolean.luminus_changement_prix_programme
+          - input_datetime.luminus_prix_energie_date_effet
+          - input_number.luminus_prix_energie_ttc_prochain
+    condition:
+      - condition: state
+        entity_id: input_boolean.luminus_changement_prix_programme
+        state: "on"
+      - condition: template
+        value_template: >
+          {{ now().date() >= strptime(states('input_datetime.luminus_prix_energie_date_effet'), '%Y-%m-%d').date() }}
+      - condition: template
+        value_template: "{{ states('input_number.luminus_prix_energie_ttc_prochain') | float(0) > 0 }}"
+    action:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_prix_energie_ttc
+        data:
+          value: "{{ states('input_number.luminus_prix_energie_ttc_prochain') | float(0) }}"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.luminus_changement_prix_programme
+      - action: persistent_notification.create
+        data:
+          title: "Luminus - Nouveau prix appliqué"
+          message: >
+            Le prix énergie programmé ({{ states('input_number.luminus_prix_energie_ttc_prochain') }} c€/kWh)
+            vient d'être appliqué. S'il aurait dû entrer en vigueur avant
+            aujourd'hui, pense à utiliser la correction manuelle pour
+            rattraper les jours concernés.
+          notification_id: luminus_changement_prix_applique
+    mode: single
+
+  - id: luminus_appliquer_correction_manuelle
+    alias: "Luminus - Applique la correction manuelle"
+    description: >
+      Sur pression du bouton, ajoute input_number.luminus_correction_manuelle
+      aux accumulateurs mensuel et annuel (pour rattraper un prix encodé en
+      retard), puis remet la correction à 0.
+    trigger:
+      - trigger: state
+        entity_id: input_button.luminus_appliquer_correction_manuelle
+    condition:
+      - condition: template
+        value_template: "{{ states('input_number.luminus_correction_manuelle') | float(0) != 0 }}"
+    action:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_cout_accumulateur_mois
+        data:
+          value: >
+            {{ (states('input_number.luminus_cout_accumulateur_mois') | float(0)
+                + states('input_number.luminus_correction_manuelle') | float(0)) | round(2) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_cout_accumulateur_annee
+        data:
+          value: >
+            {{ (states('input_number.luminus_cout_accumulateur_annee') | float(0)
+                + states('input_number.luminus_correction_manuelle') | float(0)) | round(2) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_correction_manuelle
         data:
           value: 0
     mode: single
