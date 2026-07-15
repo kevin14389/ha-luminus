@@ -52,12 +52,17 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
   prix), en €
 - `sensor.luminus_cout_total_jour` — coût total du jour (variable + fixe), en €
 - `sensor.luminus_cout_total_mois` / `sensor.luminus_cout_total_annee` —
-  estimations cumulées du mois / de l'année en cours
+  total réel cumulé du mois / de l'année en cours (voir "Changement de tarif
+  en cours d'année" ci-dessous)
 
-### Automation
-- Une notification persistante (**Luminus - Résumé quotidien**) est créée
-  chaque soir à 23h55 avec le récapitulatif du jour (avant la remise à zéro
-  du compteur journalier à minuit).
+### Automations
+- **Résumé quotidien** (23h55) : notification persistante avec le
+  récapitulatif du jour, et ajout du coût du jour aux accumulateurs
+  mensuel/annuel (`input_number.luminus_cout_accumulateur_mois` /
+  `_annee`, entités internes à ne pas modifier à la main).
+- **Reset mensuel** (00h01 le 1er du mois) et **reset annuel** (00h02 le
+  1er janvier) : remettent les accumulateurs à 0 pour démarrer la nouvelle
+  période.
 
 ## Aides tarifaires modifiables (à adapter quand les tarifs changent)
 
@@ -96,9 +101,29 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 - **Redevance de raccordement** : appliquée sur l'ensemble de la
   consommation, sans tenir compte de l'exemption réglementaire des 100
   premiers kWh/an (montant negligeable : 0,075 c€/kWh).
-- Les estimations mensuelles/annuelles supposent que le coût fixe
-  journalier est constant sur toute la période (pas de rétro-calcul si tu
-  modifies un tarif en cours de mois/année).
+
+## Changement de tarif en cours d'année (ex. indexation Luminus en septembre)
+
+Le système gère ça correctement, sans rien recalculer manuellement :
+
+- Chaque jour, `sensor.luminus_cout_total_jour` est calculé avec le prix en
+  vigueur **ce jour-là**, puis figé le soir (23h55) dans les accumulateurs
+  mensuel/annuel.
+- Si tu changes `input_number.luminus_prix_energie_ttc` (ou n'importe quel
+  autre tarif) en cours de mois, seuls les jours **suivant** le changement
+  utilisent le nouveau prix. Les jours précédents restent comptabilisés au
+  prix d'avant, aussi bien dans l'historique de `sensor.luminus_cout_total_jour`
+  que dans les totaux mensuel/annuel.
+- Exemple concret : si tu modifies le prix le 15 septembre, le total du mois
+  de septembre (`sensor.luminus_cout_total_mois`) sera la somme des 14
+  premiers jours à l'ancien prix + les jours suivants au nouveau prix — pas
+  le nouveau prix appliqué à tout le mois.
+
+Seule limite : les coûts fixes journaliers (`sensor.luminus_cout_fixe_journalier`,
+qui inclut la redevance Luminus, le terme fixe GRD et le tarif prosumer) ne
+sont pas rétroactivement recalculés au prorata exact si tu changes leur
+valeur en cours de mois — l'écart est généralement minime (ce sont de petits
+montants forfaitaires annuels).
 
 ## Exemple de carte Lovelace
 

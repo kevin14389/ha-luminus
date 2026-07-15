@@ -156,6 +156,28 @@ input_number:
     step: 0.5
     initial: 10
 
+  # --- Accumulateurs internes : somme des coûts journaliers déjà figés,
+  #     jour par jour, chacun avec le prix qui était en vigueur ce jour-là.
+  #     Ne pas modifier manuellement (remis à 0 automatiquement au 1er du
+  #     mois / au 1er janvier, incrémentés chaque soir à 23h55). ---
+  luminus_cout_accumulateur_mois:
+    name: "Luminus - Accumulateur coût mensuel (interne)"
+    icon: mdi:cash-sync
+    unit_of_measurement: "EUR"
+    min: 0
+    max: 10000
+    step: 0.01
+    initial: 0
+
+  luminus_cout_accumulateur_annee:
+    name: "Luminus - Accumulateur coût annuel (interne)"
+    icon: mdi:cash-sync
+    unit_of_measurement: "EUR"
+    min: 0
+    max: 10000
+    step: 0.01
+    initial: 0
+
 input_boolean:
   luminus_remise_fidelite_active:
     name: "Remise fidélité domiciliation active"
@@ -271,6 +293,8 @@ template:
           - sensor.luminus_conso_jour
           - sensor.luminus_conso_mois
           - sensor.luminus_conso_annee
+          - input_number.luminus_cout_accumulateur_mois
+          - input_number.luminus_cout_accumulateur_annee
     sensor:
       - name: "Luminus Prix kWh EUR"
         unique_id: luminus_prix_kwh_eur
@@ -307,10 +331,11 @@ template:
         unit_of_measurement: "EUR"
         device_class: monetary
         state: >
-          {% set kwh = states('sensor.luminus_conso_mois') | float(0) %}
-          {% set prix = states('sensor.luminus_prix_kwh_ttc') | float(0) / 100 %}
-          {% set fixe_jour = states('sensor.luminus_cout_fixe_journalier') | float(0) %}
-          {{ ((kwh * prix) + (fixe_jour * now().day)) | round(2) }}
+          {# Somme des jours déjà clôturés ce mois-ci (chacun figé avec le
+             prix en vigueur ce jour-là) + la progression du jour en cours. #}
+          {% set accumule = states('input_number.luminus_cout_accumulateur_mois') | float(0) %}
+          {% set aujourdhui = states('sensor.luminus_cout_total_jour') | float(0) %}
+          {{ (accumule + aujourdhui) | round(2) }}
 
       - name: "Luminus Cout Total Annee"
         unique_id: luminus_cout_total_annee
@@ -318,21 +343,29 @@ template:
         unit_of_measurement: "EUR"
         device_class: monetary
         state: >
-          {% set kwh = states('sensor.luminus_conso_annee') | float(0) %}
-          {% set prix = states('sensor.luminus_prix_kwh_ttc') | float(0) / 100 %}
-          {% set fixe_jour = states('sensor.luminus_cout_fixe_journalier') | float(0) %}
-          {{ ((kwh * prix) + (fixe_jour * now().timetuple().tm_yday)) | round(2) }}
+          {# Même logique que le total mensuel, mais sur l'année entière. #}
+          {% set accumule = states('input_number.luminus_cout_accumulateur_annee') | float(0) %}
+          {% set aujourdhui = states('sensor.luminus_cout_total_jour') | float(0) %}
+          {{ (accumule + aujourdhui) | round(2) }}
 
 # =============================================================================
-# Résumé quotidien (avant la remise à zéro du compteur journalier à minuit)
+# Résumé quotidien + accumulation mensuelle/annuelle
+# (avant la remise à zéro du compteur journalier à minuit)
+#
+# Le coût du jour, une fois clôturé, est ajouté tel quel aux accumulateurs
+# mensuel/annuel : chaque jour reste figé avec le prix qui était en vigueur
+# ce jour-là, donc un changement de tarif en cours de mois/année (ex. une
+# indexation Luminus en septembre) n'écrase jamais rétroactivement les jours
+# précédents.
 # =============================================================================
 automation:
   - id: luminus_resume_quotidien
     alias: "Luminus - Résumé quotidien du coût électricité"
     description: >
       Envoie une notification persistante récapitulant la consommation et le
-      coût du jour, juste avant que le compteur journalier ne se remette à
-      zéro à minuit.
+      coût du jour, et ajoute le coût du jour (figé au prix du jour) aux
+      accumulateurs mensuel/annuel, juste avant que le compteur journalier
+      ne se remette à zéro à minuit.
     trigger:
       - trigger: time
         at: "23:55:00"
@@ -351,4 +384,52 @@ automation:
 
             Coût total du jour : {{ states('sensor.luminus_cout_total_jour') }} €
           notification_id: luminus_resume_quotidien
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_cout_accumulateur_mois
+        data:
+          value: >
+            {{ (states('input_number.luminus_cout_accumulateur_mois') | float(0)
+                + states('sensor.luminus_cout_total_jour') | float(0)) | round(2) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_cout_accumulateur_annee
+        data:
+          value: >
+            {{ (states('input_number.luminus_cout_accumulateur_annee') | float(0)
+                + states('sensor.luminus_cout_total_jour') | float(0)) | round(2) }}
+    mode: single
+
+  - id: luminus_reset_accumulateur_mois
+    alias: "Luminus - Reset accumulateur mensuel"
+    description: "Remet l'accumulateur mensuel à 0 le 1er de chaque mois."
+    trigger:
+      - trigger: time
+        at: "00:01:00"
+    condition:
+      - condition: template
+        value_template: "{{ now().day == 1 }}"
+    action:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_cout_accumulateur_mois
+        data:
+          value: 0
+    mode: single
+
+  - id: luminus_reset_accumulateur_annee
+    alias: "Luminus - Reset accumulateur annuel"
+    description: "Remet l'accumulateur annuel à 0 le 1er janvier."
+    trigger:
+      - trigger: time
+        at: "00:02:00"
+    condition:
+      - condition: template
+        value_template: "{{ now().month == 1 and now().day == 1 }}"
+    action:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_cout_accumulateur_annee
+        data:
+          value: 0
     mode: single
