@@ -4,33 +4,50 @@
 # Contrat  : Luminus Comfy Electricité (fixe) - fiche tarifaire juillet 2025
 # Client   : résidentiel, Léglise (province de Luxembourg) - Région wallonne
 # Réseau   : ORES Luxembourg - compteur digital, mono-horaire
-# Régime   : Prosumer avec compteur communicant - la production PV est nettée
-#            directement par le compteur (pas de compensation d'injection
-#            variable indexée Belpex : la facture ne porte que sur le
-#            prélèvement net, plus le tarif prosumer forfaitaire au kW)
+# Régime   : Prosumer avec compteur communicant. IMPORTANT (corrigé après
+#            analyse d'un vrai décompte annuel Luminus) : il n'y a PAS de
+#            tarif prosumer forfaitaire (€/kW/an) sur ce contrat - celui-ci
+#            ne s'applique qu'aux compteurs analogiques inversés. Avec un
+#            compteur digital, ORES facture le réseau (ELIA + ORES
+#            Luxembourg) sur le prélèvement BRUT, avec un "Ristorno"
+#            (remise) pour la production décentralisée. On modélise ça avec
+#            un taux réseau "combiné" (voir ores_cout_reseau_variable
+#            ci-dessous), calculé à partir du total réel HTVA
+#            ELIA + ORES divisé par la conso NETTE annuelle - ça reproduit
+#            le bon coût total sans avoir à suivre les kWh bruts (que ce
+#            package ne mesure pas).
 #
 # Toutes les valeurs tarifaires sont des input_number modifiables depuis
 # Paramètres > Appareils et services > Aides, SANS toucher à ce fichier.
-# Mets-les à jour quand Luminus ou ORES publient de nouveaux tarifs :
-#   - Luminus (prix énergie, redevance fixe) : nouvelle fiche tarifaire
-#     disponible sur My Luminus, généralement lors d'une indexation
-#     (souvent autour de septembre, mais peut arriver à tout moment
-#     avec un préavis d'1 mois pour un contrat fixe).
-#   - ORES (coûts réseau, tarif prosumer) : révisés chaque 1er janvier,
-#     publiés sur ores.be.
-#   - Taxes régionales/fédérales (accise, cotisation énergie,
-#     redevance de raccordement) : revues par le SPF Finances / la Région
-#     wallonne, généralement en janvier.
+# Mets-les à jour quand Luminus ou ORES publient de nouveaux tarifs, ou
+# quand tu reçois un nouveau décompte annuel Luminus (le plus fiable : il
+# donne les vrais montants HTVA payés à Luminus/ELIA/ORES/gouvernement) :
+#   - Luminus (prix énergie, redevance fixe, coûts énergie verte) :
+#     nouvelle fiche tarifaire sur My Luminus, ou décompte annuel.
+#   - ores_cout_reseau_variable : recalcule-le à chaque décompte annuel via
+#     (Montant ELIA + Montant ORES − Terme fixe ORES) ÷ conso nette (kWh)
+#     de la période, le tout HTVA (voir le détail "Electricité : Détails de
+#     votre montant" de ton décompte).
+#   - Taxes fédérales/régionales (accise, cotisation énergie, redevance de
+#     raccordement) : revues par le SPF Finances / la Région wallonne,
+#     généralement en janvier - mais la réforme des accises de 2025 a déjà
+#     changé ce taux en cours d'année, vérifie ton décompte plutôt que les
+#     anciennes fiches tarifaires.
 #
 # Simplifications assumées (à corriger manuellement si ta situation change) :
-#   - Droit d'accise spécial : le tarif retenu (5,0329 c€/kWh) est celui
-#     valable jusqu'à 20.000 kWh/an. Au-delà, il baisse à 4,8188 c€/kWh.
 #   - Redevance de raccordement : appliquée sur toute la consommation,
 #     sans tenir compte de l'exemption des 100 premiers kWh/an (montant
 #     négligeable : 0,075 c€/kWh).
-#   - TVA : appliquée globalement à 6% sur l'énergie (hors remise) + coûts
-#     réseau + taxes, à l'exception de la redevance fixe Luminus qui est
-#     déjà TVA incluse sur la fiche tarifaire.
+#   - Coûts énergie verte : varie chaque trimestre, la valeur ci-dessous est
+#     celle du dernier trimestre connu (Q3 2025) - à rafraîchir si tu veux
+#     rester précis, ou laisser tel quel comme bonne approximation.
+#   - Taux réseau combiné (ores_cout_reseau_variable) : c'est une MOYENNE
+#     annuelle réelle, pas le détail des ~11 sous-composantes ELIA/ORES
+#     (E210, E520, E650, E850...). Comme ton ratio prélèvement brut/net
+#     dépend de ta production solaire (donc de la saison), ce taux moyen
+#     sous-estime probablement le coût réseau en hiver (peu de solaire, brut
+#     ≈ net) et le surestime un peu en été (forte autoconsommation) - mais
+#     il redonne le bon total sur une année complète.
 # =============================================================================
 
 input_number:
@@ -53,24 +70,19 @@ input_number:
     step: 0.01
     initial: 65.00
 
-  # --- 2. Coûts d'utilisation du réseau - ORES Luxembourg ---
-  ores_cout_distribution:
-    name: "ORES - Coût de distribution (HTVA)"
+  # --- 2. Coûts d'utilisation du réseau - ELIA (transport) + ORES Luxembourg
+  #     (distribution), combinés en un taux moyen réel (voir note en tête de
+  #     fichier). Calculé à partir du décompte annuel 01.12.2024-30.11.2025 :
+  #     (300,44€ ELIA + 823,92€ ORES − 13,04€ terme fixe) ÷ 6.311,33 kWh nets
+  #     = 17,61 c€/kWh. Recalcule cette formule à chaque nouveau décompte. ---
+  ores_cout_reseau_variable:
+    name: "ELIA + ORES - Coût réseau combiné (HTVA)"
     icon: mdi:transmission-tower
     unit_of_measurement: "c€/kWh"
     min: 0
     max: 50
     step: 0.01
-    initial: 10.79
-
-  ores_cout_transport:
-    name: "ORES - Coût de transport (HTVA)"
-    icon: mdi:transmission-tower-export
-    unit_of_measurement: "c€/kWh"
-    min: 0
-    max: 20
-    step: 0.01
-    initial: 2.98
+    initial: 17.61
 
   ores_terme_fixe_grd:
     name: "ORES - Terme fixe GRD / gestion des données (HTVA)"
@@ -79,25 +91,7 @@ input_number:
     min: 0
     max: 100
     step: 0.01
-    initial: 13.84
-
-  ores_tarif_prosumer:
-    name: "ORES - Tarif prosumer (HTVA)"
-    icon: mdi:solar-power
-    unit_of_measurement: "€/kW/an"
-    min: 0
-    max: 200
-    step: 0.01
-    initial: 86.96
-
-  ores_puissance_onduleur:
-    name: "Puissance de l'onduleur photovoltaïque"
-    icon: mdi:solar-panel
-    unit_of_measurement: "kW"
-    min: 0
-    max: 10
-    step: 0.1
-    initial: 5
+    initial: 13.06
 
   # --- 3. Taxes et redevances (Région wallonne / fédéral) ---
   taxe_accise_special:
@@ -107,7 +101,7 @@ input_number:
     min: 0
     max: 20
     step: 0.0001
-    initial: 5.0329
+    initial: 4.7480
 
   taxe_cotisation_energie:
     name: "Taxe - Cotisation sur l'énergie (HTVA)"
@@ -116,7 +110,16 @@ input_number:
     min: 0
     max: 5
     step: 0.0001
-    initial: 0.2042
+    initial: 0.1927
+
+  luminus_cout_energie_verte:
+    name: "Luminus - Coûts énergie verte (HTVA)"
+    icon: mdi:leaf
+    unit_of_measurement: "c€/kWh"
+    min: 0
+    max: 10
+    step: 0.0001
+    initial: 2.8281
 
   taxe_redevance_raccordement:
     name: "Taxe - Redevance de raccordement (HTVA)"
@@ -268,14 +271,12 @@ template:
         entity_id:
           - input_number.luminus_prix_energie_ttc
           - input_number.luminus_redevance_fixe_annuelle
-          - input_number.ores_cout_distribution
-          - input_number.ores_cout_transport
+          - input_number.ores_cout_reseau_variable
           - input_number.ores_terme_fixe_grd
-          - input_number.ores_tarif_prosumer
-          - input_number.ores_puissance_onduleur
           - input_number.taxe_accise_special
           - input_number.taxe_cotisation_energie
           - input_number.taxe_redevance_raccordement
+          - input_number.luminus_cout_energie_verte
           - input_number.taux_tva
           - input_number.remise_fidelite_12_mois
           - input_number.remise_fidelite_24_mois
@@ -306,14 +307,14 @@ template:
             {% endif %}
           {% endif %}
 
-          {# Coûts réseau (ORES) et taxes, tous HTVA #}
-          {% set distribution = states('input_number.ores_cout_distribution') | float(0) %}
-          {% set transport = states('input_number.ores_cout_transport') | float(0) %}
+          {# Coûts réseau combiné (ELIA+ORES), énergie verte et taxes, tous HTVA #}
+          {% set reseau = states('input_number.ores_cout_reseau_variable') | float(0) %}
+          {% set energie_verte = states('input_number.luminus_cout_energie_verte') | float(0) %}
           {% set accise = states('input_number.taxe_accise_special') | float(0) %}
           {% set cotisation = states('input_number.taxe_cotisation_energie') | float(0) %}
           {% set raccordement = states('input_number.taxe_redevance_raccordement') | float(0) %}
 
-          {% set total_ht = energie_ht + distribution + transport + accise + cotisation + raccordement %}
+          {% set total_ht = energie_ht + reseau + energie_verte + accise + cotisation + raccordement %}
           {{ (total_ht * (1 + tva / 100)) | round(4) }}
 
       - name: "Luminus Cout Fixe Journalier"
@@ -325,10 +326,8 @@ template:
           {% set tva = states('input_number.taux_tva') | float(0) %}
           {% set redevance_ttc = states('input_number.luminus_redevance_fixe_annuelle') | float(0) %}
           {% set grd = states('input_number.ores_terme_fixe_grd') | float(0) %}
-          {% set prosumer_kw = states('input_number.ores_tarif_prosumer') | float(0) %}
-          {% set puissance = states('input_number.ores_puissance_onduleur') | float(0) %}
-          {% set reseau_ttc = (grd + (prosumer_kw * puissance)) * (1 + tva / 100) %}
-          {{ ((redevance_ttc + reseau_ttc) / 365) | round(4) }}
+          {% set grd_ttc = grd * (1 + tva / 100) %}
+          {{ ((redevance_ttc + grd_ttc) / 365) | round(4) }}
 
   - trigger:
       - trigger: time_pattern
@@ -427,7 +426,7 @@ automation:
 
             Coût variable : {{ states('sensor.luminus_cout_variable_jour') }} €
 
-            Coût fixe (réseau + prosumer) : {{ states('sensor.luminus_cout_fixe_journalier') }} €
+            Coût fixe (redevance Luminus + terme fixe GRD) : {{ states('sensor.luminus_cout_fixe_journalier') }} €
 
             Coût total du jour : {{ states('sensor.luminus_cout_total_jour') }} €
           notification_id: luminus_resume_quotidien

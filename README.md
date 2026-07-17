@@ -2,8 +2,13 @@
 
 Système Home Assistant qui calcule **automatiquement, chaque jour**, le prix
 et le coût de ton électricité pour le contrat **Luminus Comfy Electricité**
-(fixe), à Léglise, province de Luxembourg — réseau **ORES Luxembourg**,
-régime **prosumer** avec compteur communicant.
+(fixe), à Léglise, province de Luxembourg — réseau **ELIA (transport) + ORES
+Luxembourg (distribution)**, régime **prosumer** avec compteur communicant.
+
+> Les tarifs ci-dessous ont été **validés contre un vrai décompte annuel
+> Luminus** (01.12.2024 → 30.11.2025), pas seulement contre la fiche
+> tarifaire générique — voir "Vérification contre un vrai décompte" plus bas
+> pour la méthode et les écarts trouvés.
 
 Toute la tarification (prix de l'énergie, coûts réseau ORES, taxes, TVA,
 remises de fidélité) est exposée sous forme d'aides (`input_number` /
@@ -47,7 +52,7 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 - `sensor.luminus_prix_kwh_eur` — le même prix en EUR/kWh (à utiliser comme
   "entité de prix" dans le Tableau de bord Énergie de Home Assistant)
 - `sensor.luminus_cout_fixe_journalier` — quote-part journalière des coûts
-  fixes (redevance Luminus + terme fixe GRD + tarif prosumer), en €
+  fixes (redevance Luminus + terme fixe GRD), en €
 - `sensor.luminus_cout_variable_jour` — coût variable du jour (conso ×
   prix), en €
 - `sensor.luminus_cout_total_jour` — coût total du jour (variable + fixe), en €
@@ -75,16 +80,14 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 
 | Aide | Source | Valeur initiale |
 |---|---|---|
-| `input_number.luminus_prix_energie_ttc` | Fiche tarifaire Luminus, "Énergie fournie" | 18,73 c€/kWh |
-| `input_number.luminus_redevance_fixe_annuelle` | Fiche tarifaire Luminus | 65,00 €/an |
-| `input_number.ores_cout_distribution` | ORES Luxembourg, compteur mono-horaire | 10,79 c€/kWh |
-| `input_number.ores_cout_transport` | ORES | 2,98 c€/kWh |
-| `input_number.ores_terme_fixe_grd` | ORES | 13,84 €/an |
-| `input_number.ores_tarif_prosumer` | ORES Luxembourg | 86,96 €/kW/an |
-| `input_number.ores_puissance_onduleur` | Puissance de ton onduleur PV | 5 kW |
-| `input_number.taxe_accise_special` | SPF Finances (valable jusqu'à 20.000 kWh/an) | 5,0329 c€/kWh |
-| `input_number.taxe_cotisation_energie` | Région wallonne | 0,2042 c€/kWh |
-| `input_number.taxe_redevance_raccordement` | Région wallonne | 0,0750 c€/kWh |
+| `input_number.luminus_prix_energie_ttc` | Décompte annuel, tarif en vigueur depuis le 23.09.2025 | 18,73 c€/kWh |
+| `input_number.luminus_redevance_fixe_annuelle` | Décompte annuel | 65,00 €/an |
+| `input_number.luminus_cout_energie_verte` | Décompte annuel, dernier trimestre connu (Q3 2025) | 2,8281 c€/kWh |
+| `input_number.ores_cout_reseau_variable` | ELIA + ORES combinés, moyenne réelle du dernier décompte annuel | 17,61 c€/kWh |
+| `input_number.ores_terme_fixe_grd` | ORES (décompte annuel) | 13,06 €/an |
+| `input_number.taxe_accise_special` | SPF Finances, taux réformé 2025 (décompte annuel) | 4,7480 c€/kWh |
+| `input_number.taxe_cotisation_energie` | Région wallonne (décompte annuel) | 0,1927 c€/kWh |
+| `input_number.taxe_redevance_raccordement` | Région wallonne (décompte annuel) | 0,0750 c€/kWh |
 | `input_number.taux_tva` | TVA électricité (Belgique) | 6 % |
 | `input_number.remise_fidelite_12_mois` | Promo Luminus domiciliation | 5 % |
 | `input_number.remise_fidelite_24_mois` | Promo Luminus domiciliation | 10 % |
@@ -97,21 +100,63 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 
 ## Hypothèses et simplifications
 
-- **Pas de compensation d'injection variable** : en régime prosumer avec
-  compteur communicant, la production PV est nettée directement par le
-  compteur (comme un "compteur qui tourne à l'envers" virtuel) — il n'y a
-  donc pas de formule Belpex à suivre. Le coût de l'usage du réseau lié à
-  l'injection est couvert par le **tarif prosumer** forfaitaire (€/kW/an).
+- **Pas de tarif prosumer forfaitaire.** Contrairement à ma première
+  version (erreur corrigée après analyse d'un vrai décompte), le tarif
+  prosumer (€/kW/an) ne s'applique qu'aux compteurs analogiques inversés.
+  Avec un compteur digital, ELIA + ORES facturent le réseau sur le
+  prélèvement **brut** (avant compensation par ta production), avec un
+  "Ristorno" (remise) pour la production décentralisée — un mécanisme que
+  ce package ne peut pas suivre en détail puisqu'il ne mesure que ta
+  consommation nette. À la place, `ores_cout_reseau_variable` est un taux
+  **moyen réel**, calculé une fois par an à partir de ton décompte (voir
+  "Vérification contre un vrai décompte"), qui redonne le bon coût annuel
+  total sans suivre les kWh bruts.
 - **TVA 6 %**, appliquée globalement sur l'énergie (après remise éventuelle)
-  + coûts réseau + taxes. La redevance fixe annuelle Luminus (65 €/an) est
-  déjà TVA incluse sur la fiche tarifaire et n'est donc pas re-majorée.
-- **Droit d'accise spécial** : le taux retenu (5,0329 c€/kWh) est celui
-  valable jusqu'à 20.000 kWh/an de consommation ; au-delà (peu probable pour
-  un ménage), il descend à 4,8188 c€/kWh — à ajuster manuellement si
-  pertinent.
+  + coûts énergie verte + coût réseau + taxes. La redevance fixe annuelle
+  Luminus (65 €/an) est déjà TVA incluse sur le décompte et n'est donc pas
+  re-majorée.
+- **Droit d'accise spécial** : la réforme des accises de 2025 a changé ce
+  taux en cours d'année (voir `luminus.be/reforme-accises`) — la valeur
+  retenue (4,7480 c€/kWh) est celle constatée sur le dernier décompte, pas
+  celle de l'ancienne fiche tarifaire par tranche de consommation.
 - **Redevance de raccordement** : appliquée sur l'ensemble de la
   consommation, sans tenir compte de l'exemption réglementaire des 100
   premiers kWh/an (montant negligeable : 0,075 c€/kWh).
+
+## Vérification contre un vrai décompte
+
+La première version de ce système reposait uniquement sur la fiche
+tarifaire générique Luminus (destinée aux nouveaux clients), qui a mené à
+deux erreurs corrigées après analyse d'un vrai décompte annuel (période
+01.12.2024-30.11.2025) :
+
+1. **Un tarif prosumer forfaitaire (434,80 €/an) qui ne s'applique pas à ce
+   contrat** — le vrai décompte montre un "Ristorno" (remise, pas un
+   forfait) pour la production décentralisée, propre au régime "compteur
+   digital + prélèvement brut" (voir ci-dessus).
+2. **Les "coûts énergie verte" totalement absents du calcul** (~2,83
+   c€/kWh, une ligne bien réelle et non négligeable du décompte).
+
+Méthode utilisée pour `ores_cout_reseau_variable` (le taux combiné
+ELIA+ORES) : à partir de la section "Electricité : Détails de votre
+montant" du décompte —
+
+```
+(Montant à payer pour ELIA + Montant à payer pour ORES Luxembourg
+ − total des lignes "Terme Fixe")
+ ÷ consommation nette totale (kWh, même base que les lignes Luminus/accise)
+ × 100  →  c€/kWh
+```
+
+Pour ce décompte : `(300,44 + 823,92 − 13,04) ÷ 6.311,33 × 100 = 17,61 c€/kWh`.
+
+**Limite connue** : comme le ratio prélèvement brut/net dépend de ta
+production solaire (donc de la saison), ce taux moyen sous-estime
+probablement le coût réseau réel en hiver (peu de solaire, brut ≈ net) et
+le surestime un peu en été (forte autoconsommation) — mais il redonne le
+bon total sur une année complète, ce qui est cohérent avec l'objectif de ce
+système (suivi/estimation, pas facture officielle). Recalcule cette
+formule à chaque nouveau décompte annuel pour rester calé sur la réalité.
 
 ## Changement de tarif en cours d'année (ex. indexation Luminus en septembre)
 
@@ -131,10 +176,10 @@ Le système gère ça correctement, sans rien recalculer manuellement :
   le nouveau prix appliqué à tout le mois.
 
 Seule limite : les coûts fixes journaliers (`sensor.luminus_cout_fixe_journalier`,
-qui inclut la redevance Luminus, le terme fixe GRD et le tarif prosumer) ne
-sont pas rétroactivement recalculés au prorata exact si tu changes leur
-valeur en cours de mois — l'écart est généralement minime (ce sont de petits
-montants forfaitaires annuels).
+qui inclut la redevance Luminus et le terme fixe GRD) ne sont pas
+rétroactivement recalculés au prorata exact si tu changes leur valeur en
+cours de mois — l'écart est généralement minime (ce sont de petits montants
+forfaitaires annuels).
 
 ### Programmer un changement de prix à l'avance (recommandé)
 
@@ -197,13 +242,18 @@ entities:
 
 ## Mise à jour des tarifs
 
-- **Luminus** (prix énergie, redevance fixe) : nouvelle fiche tarifaire
-  disponible sur [My Luminus](https://my.luminus.be) en cas d'indexation
-  (préavis d'au moins 1 mois pour un contrat fixe).
-- **ORES** (coûts réseau, tarif prosumer) : révisés chaque 1er janvier,
-  publiés sur [ores.be](https://www.ores.be).
+- **Luminus** (prix énergie, redevance fixe, coûts énergie verte) : nouvelle
+  fiche tarifaire sur [My Luminus](https://my.luminus.be) en cas
+  d'indexation (préavis d'au moins 1 mois pour un contrat fixe), ou plus
+  fiable : ton prochain décompte annuel.
+- **ELIA + ORES** (`ores_cout_reseau_variable`, `ores_terme_fixe_grd`) :
+  recalcule la formule de la section "Vérification contre un vrai
+  décompte" à chaque nouveau décompte annuel Luminus — c'est la source la
+  plus fiable, plus fiable que les fiches tarifaires génériques.
 - **Taxes régionales/fédérales** : revues généralement en janvier par le SPF
-  Finances / la Région wallonne.
+  Finances / la Région wallonne, mais vérifie aussi ton décompte annuel (la
+  réforme des accises 2025 a changé ce taux en cours d'année, en dehors du
+  cycle habituel de janvier).
 
 Dans tous les cas, il suffit de mettre à jour les `input_number`
 correspondants depuis l'interface Home Assistant — aucune modification de
