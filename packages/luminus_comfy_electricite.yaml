@@ -237,18 +237,23 @@ input_button:
 # Suivi de la consommation - basé sur le capteur du compteur communicant
 # =============================================================================
 utility_meter:
+  # Pas de "name:" ici volontairement : quand un nom est fourni, HA génère
+  # l'entity_id en le slugifiant (ex. "Consommation de l'année" devient
+  # sensor.luminus_consommation_de_l_annee), ce qui casse la correspondance
+  # avec les entity_id utilisés partout ailleurs dans ce fichier et dans le
+  # dashboard. Sans "name:", l'entity_id suit directement la clé YAML
+  # ci-dessous (sensor.luminus_conso_jour, etc.) - stable et prévisible.
+  # Tu peux renommer l'affichage ("friendly name") depuis Paramètres >
+  # Entités sans risque, ça ne touche pas l'entity_id.
   luminus_conso_jour:
-    name: "Luminus - Consommation du jour"
     source: sensor.daily_energy_delivered_peak
     cycle: daily
 
   luminus_conso_mois:
-    name: "Luminus - Consommation du mois"
     source: sensor.daily_energy_delivered_peak
     cycle: monthly
 
   luminus_conso_annee:
-    name: "Luminus - Consommation de l'année"
     source: sensor.daily_energy_delivered_peak
     cycle: yearly
 
