@@ -70,10 +70,12 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
   en cours d'année" ci-dessous)
 
 ### Automations
-- **Résumé quotidien** (23h55) : notification persistante avec le
-  récapitulatif du jour, et ajout du coût du jour aux accumulateurs
-  mensuel/annuel (`input_number.luminus_cout_accumulateur_mois` /
-  `_annee`, entités internes à ne pas modifier à la main).
+- **Résumé quotidien** (00h00m30 — juste après minuit) : calcule le coût de
+  la journée qui vient de se terminer à partir des attributs `last_period`
+  des `utility_meter` (capture exacte du cycle qui vient de se terminer,
+  sans aucune perte), envoie une notification persistante, et l'ajoute aux
+  accumulateurs mensuel/annuel (`input_number.luminus_cout_accumulateur_mois`
+  / `_annee`, entités internes à ne pas modifier à la main).
 - **Reset mensuel** (00h01 le 1er du mois) et **reset annuel** (00h02 le
   1er janvier) : remettent les accumulateurs à 0 pour démarrer la nouvelle
   période.
@@ -213,8 +215,8 @@ changerait la règle ci-dessus.
 Le système gère ça correctement, sans rien recalculer manuellement :
 
 - Chaque jour, `sensor.luminus_cout_total_jour` est calculé avec le prix en
-  vigueur **ce jour-là**, puis figé le soir (23h55) dans les accumulateurs
-  mensuel/annuel.
+  vigueur **ce jour-là**, puis figé juste après minuit (voir "Résumé
+  quotidien" ci-dessus) dans les accumulateurs mensuel/annuel.
 - Si tu changes `input_number.luminus_prix_energie_ttc` (ou n'importe quel
   autre tarif) en cours de mois, seuls les jours **suivant** le changement
   utilisent le nouveau prix. Les jours précédents restent comptabilisés au

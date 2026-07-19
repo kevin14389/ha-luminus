@@ -497,39 +497,53 @@ template:
 
 # =============================================================================
 # Résumé quotidien + accumulation mensuelle/annuelle
-# (avant la remise à zéro du compteur journalier à minuit)
 #
-# Le coût du jour, une fois clôturé, est ajouté tel quel aux accumulateurs
-# mensuel/annuel : chaque jour reste figé avec le prix qui était en vigueur
-# ce jour-là, donc un changement de tarif en cours de mois/année (ex. une
-# indexation Luminus en septembre) n'écrase jamais rétroactivement les jours
-# précédents.
+# Se déclenche juste APRÈS minuit et lit les attributs "last_period" des
+# utility_meter de prélèvement/injection - la valeur exacte du cycle qui
+# vient de se terminer, capturée par Home Assistant au moment précis du
+# reset, sans aucune perte. (Une version antérieure calculait ça à 23h55
+# en lisant l'état "en direct" du jour : les 5 dernières minutes avant
+# minuit n'étaient alors jamais comptabilisées dans les accumulateurs -
+# corrigé ici.)
 # =============================================================================
 automation:
   - id: luminus_resume_quotidien
     alias: "Luminus - Résumé quotidien du coût électricité"
     description: >
-      Envoie une notification persistante récapitulant la consommation et le
-      coût du jour, et ajoute le coût du jour (figé au prix du jour) aux
-      accumulateurs mensuel/annuel, juste avant que le compteur journalier
-      ne se remette à zéro à minuit.
+      Calcule le coût de la journée qui vient de se terminer à partir des
+      attributs last_period (capture exacte, sans les pertes d'un
+      snapshot pris avant minuit), l'ajoute aux accumulateurs mensuel/
+      annuel (figé au prix qui était en vigueur hier), et envoie une
+      notification récapitulative.
     trigger:
       - trigger: time
-        at: "23:55:00"
+        at: "00:00:30"
     action:
+      - variables:
+          prelevement_hier: "{{ state_attr('sensor.luminus_conso_jour', 'last_period') | float(0) }}"
+          injection_hier: "{{ state_attr('sensor.luminus_injection_jour', 'last_period') | float(0) }}"
+          prix_energie_taxes: "{{ states('sensor.luminus_prix_energie_taxes_ttc') | float(0) / 100 }}"
+          prix_reseau: "{{ states('sensor.luminus_prix_reseau_ttc') | float(0) / 100 }}"
+          cout_fixe_hier: "{{ states('sensor.luminus_cout_fixe_journalier') | float(0) }}"
+          date_hier: "{{ (now() - timedelta(days=1)).strftime('%d/%m/%Y') }}"
+      - variables:
+          net_facturable_hier: "{{ [prelevement_hier - injection_hier, 0] | max }}"
+      - variables:
+          cout_variable_hier: "{{ (net_facturable_hier * prix_energie_taxes) + (prelevement_hier * prix_reseau) }}"
+          cout_total_hier: "{{ ((net_facturable_hier * prix_energie_taxes) + (prelevement_hier * prix_reseau) + cout_fixe_hier) | round(4) }}"
       - action: persistent_notification.create
         data:
-          title: "Coût électricité Luminus - {{ now().strftime('%d/%m/%Y') }}"
+          title: "Coût électricité Luminus - {{ date_hier }}"
           message: >
-            Prélèvement : {{ states('sensor.luminus_conso_jour') }} kWh — Injection : {{ states('sensor.luminus_injection_jour') }} kWh — Net : {{ states('sensor.luminus_conso_nette_jour') }} kWh
+            Prélèvement : {{ prelevement_hier | round(3) }} kWh — Injection : {{ injection_hier | round(3) }} kWh — Net facturable : {{ net_facturable_hier | round(3) }} kWh
 
             Prix énergie+taxes : {{ states('sensor.luminus_prix_energie_taxes_ttc') }} c€/kWh — Prix réseau : {{ states('sensor.luminus_prix_reseau_ttc') }} c€/kWh (TTC)
 
-            Coût variable : {{ states('sensor.luminus_cout_variable_jour') }} €
+            Coût variable : {{ cout_variable_hier | round(4) }} €
 
-            Coût fixe (redevance Luminus + terme fixe GRD) : {{ states('sensor.luminus_cout_fixe_journalier') }} €
+            Coût fixe (redevance Luminus + terme fixe GRD) : {{ cout_fixe_hier | round(4) }} €
 
-            Coût total du jour : {{ states('sensor.luminus_cout_total_jour') }} €
+            Coût total du jour : {{ cout_total_hier }} €
           notification_id: luminus_resume_quotidien
       - action: input_number.set_value
         target:
@@ -537,14 +551,14 @@ automation:
         data:
           value: >
             {{ (states('input_number.luminus_cout_accumulateur_mois') | float(0)
-                + states('sensor.luminus_cout_total_jour') | float(0)) | round(2) }}
+                + cout_total_hier) | round(2) }}
       - action: input_number.set_value
         target:
           entity_id: input_number.luminus_cout_accumulateur_annee
         data:
           value: >
             {{ (states('input_number.luminus_cout_accumulateur_annee') | float(0)
-                + states('sensor.luminus_cout_total_jour') | float(0)) | round(2) }}
+                + cout_total_hier) | round(2) }}
     mode: single
 
   - id: luminus_reset_accumulateur_mois
