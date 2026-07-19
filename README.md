@@ -81,7 +81,9 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
   période.
 - **Changement de prix programmé** (vérifié chaque heure) : applique
   automatiquement `input_number.luminus_prix_energie_ttc_prochain` à la date
-  prévue si `input_boolean.luminus_changement_prix_programme` est activé.
+  prévue si `input_boolean.luminus_changement_prix_programme` est activé,
+  et remet `input_number.luminus_net_cumule_periode` à 0 (nouvelle période
+  tarifaire, voir "Compensation prélèvement / injection" ci-dessous).
 - **Correction manuelle** : sur pression du bouton
   `input_button.luminus_appliquer_correction_manuelle`, ajoute
   `input_number.luminus_correction_manuelle` aux accumulateurs mensuel/
@@ -172,42 +174,46 @@ formule à chaque nouveau décompte annuel pour rester calé sur la réalité.
 
 Ton compteur communicant expose deux registres séparés (prélèvement et
 injection, chacun avec un sous-registre jour/nuit) — le système additionne
-peak+offpeak pour chacun, puis calcule le solde net (prélèvement −
-injection) chaque jour.
+peak+offpeak pour chacun.
 
 **Règle appliquée** (ce contrat n'a **aucune compensation d'injection** —
-confirmé par Luminus, pas de rachat de l'excédent avant 2030 minimum) :
+confirmé par Luminus, pas de rachat de l'excédent avant 2030 minimum), et
+reproduit la façon dont Luminus facture réellement (confirmé sur un vrai
+décompte : le net prélèvement−injection est regroupé **par période
+tarifaire**, entre deux changements de prix — pas jour par jour) :
 
-- **Énergie + taxes** : calculées sur le prélèvement net, **plafonné à
-  0**. Une journée où tu injectes plus que tu ne prélèves coûte **0** sur
-  cette composante — jamais un montant négatif. Sans compensation
-  contractuelle, Luminus n'a aucune obligation de te payer l'excédent, et
-  une taxe négative n'a pas de sens (ce serait une subvention, pas une
-  taxe).
-- **Réseau** (ELIA+ORES) : toujours calculé sur le prélèvement **brut**
-  en entier, jamais réduit par l'injection. Tu payes toujours le transport
-  de ce que tu tires réellement du réseau.
-- **Le coût total du jour ne peut donc jamais descendre en dessous du
-  coût réseau + coût fixe** — jamais 0€, jamais négatif, même une journée
-  très productive.
+- **Énergie + taxes** : le système garde un cumul **non plafonné** du
+  solde net (prélèvement − injection) depuis le dernier changement de prix
+  (`input_number.luminus_net_cumule_periode`, interne). Chaque jour, seule
+  la portion qui fait dépasser ce cumul au-dessus de zéro est facturée —
+  un jour très négatif (grosse injection) compense donc les autres jours
+  de la **même période tarifaire**, exactement comme sur ton décompte
+  annuel. Le cumul repart à 0 à chaque nouveau changement de prix
+  appliqué (nouvelle période). **Jamais de montant négatif** au global sur
+  une période : sans compensation contractuelle, Luminus ne te doit rien
+  au-delà de zéro.
+- **Réseau** (ELIA+ORES) : toujours calculé sur le prélèvement **brut** du
+  jour, en entier, jamais réduit par l'injection ni par le cumul de
+  période. Tu payes toujours le transport de ce que tu tires réellement du
+  réseau, jour par jour.
 
-Deux exemples concrets :
-- **Jour productif** : tu prélèves 5 kWh la nuit, injectes 10 kWh le jour.
-  Net = 5 − 10 = −5, plafonné à 0 → énergie+taxes = 0€. Réseau = 5 kWh ×
-  prix réseau. Total = coût réseau des 5 kWh prélevés + coût fixe.
-- **Jour classique** : tu prélèves 10 kWh, injectes 5 kWh. Net = 10 − 5 =
-  5 (positif, pas de plafonnement) → énergie+taxes sur 5 kWh. Réseau sur
-  la totalité des 10 kWh prélevés. Total = (5 kWh à prix plein) + (10 kWh
-  de réseau) + coût fixe.
+Exemple concret (celui qui a servi à valider la formule) : dans la même
+période tarifaire, jour 1 tu prélèves 5 kWh et injectes 50 kWh, jour 2
+pareil, jour 3 tu prélèves 20 kWh sans injecter.
+- Cumul : jour1 → −45, jour2 → −90, jour3 → −70 (toujours négatif au
+  global sur ces 3 jours).
+- Énergie+taxes facturée les 3 jours : **0 €** au total (le cumul ne
+  repasse jamais au-dessus de 0).
+- Réseau facturé : sur 5 + 5 + 20 = **30 kWh** de prélèvement brut, peu
+  importe l'injection.
 
-`sensor.luminus_conso_nette_jour` reste **non plafonné** et peut afficher
-un nombre négatif — c'est volontaire, pour que tu voies ton vrai solde de
-production. Ce n'est qu'au moment de calculer le coût que le plafond à 0
-s'applique.
+`sensor.luminus_conso_nette_jour` affiche le solde du jour **isolé**, non
+plafonné (peut être négatif) — c'est un indicateur informatif, distinct du
+cumul de période qui sert réellement au calcul du coût.
 
 **Limite connue** : si Luminus t'accorde un jour une vraie compensation
 d'injection (ou si le régime "Injection: variable" s'active en 2030 comme
-annoncé), il faudra revoir ce plafonnement — un vrai contrat de rachat
+annoncé), il faudra revoir cette logique — un vrai contrat de rachat
 changerait la règle ci-dessus.
 
 ## Changement de tarif en cours d'année (ex. indexation Luminus en septembre)
