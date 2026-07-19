@@ -607,14 +607,6 @@ automation:
       - condition: template
         value_template: "{{ states('input_number.luminus_prix_energie_ttc_prochain') | float(0) > 0 }}"
     action:
-      - action: input_number.set_value
-        target:
-          entity_id: input_number.luminus_prix_energie_ttc
-        data:
-          value: "{{ states('input_number.luminus_prix_energie_ttc_prochain') | float(0) }}"
-      - action: input_boolean.turn_off
-        target:
-          entity_id: input_boolean.luminus_changement_prix_programme
       - action: persistent_notification.create
         data:
           title: "Luminus - Nouveau prix appliqué"
@@ -624,6 +616,19 @@ automation:
             aujourd'hui, pense à utiliser la correction manuelle pour
             rattraper les jours concernés.
           notification_id: luminus_changement_prix_applique
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_prix_energie_ttc
+        data:
+          value: "{{ states('input_number.luminus_prix_energie_ttc_prochain') | float(0) }}"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.luminus_changement_prix_programme
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_prix_energie_ttc_prochain
+        data:
+          value: 0
     mode: single
 
   - id: luminus_appliquer_correction_manuelle
