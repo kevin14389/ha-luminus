@@ -166,43 +166,47 @@ bon total sur une année complète, ce qui est cohérent avec l'objectif de ce
 système (suivi/estimation, pas facture officielle). Recalcule cette
 formule à chaque nouveau décompte annuel pour rester calé sur la réalité.
 
-## Compensation prélèvement / injection (journées "négatives")
+## Compensation prélèvement / injection
 
 Ton compteur communicant expose deux registres séparés (prélèvement et
 injection, chacun avec un sous-registre jour/nuit) — le système additionne
 peak+offpeak pour chacun, puis calcule le solde net (prélèvement −
 injection) chaque jour.
 
-Ce net peut être **négatif** un jour où tu produis plus que tu ne
-consommes : dans ce cas, la part "énergie + taxes" du coût du jour diminue
-(voire devient négative, agissant comme un crédit) — cohérent avec ce que
-montre ton vrai décompte annuel, où les périodes d'injection sont
-directement soustraites de la consommation facturée par Luminus et le
-gouvernement.
+**Règle appliquée** (ce contrat n'a **aucune compensation d'injection** —
+confirmé par Luminus, pas de rachat de l'excédent avant 2030 minimum) :
 
-**Ce qui ne change jamais** : le coût **réseau** (ELIA+ORES), lui, reste
-calculé sur ton prélèvement **brut** — jamais négatif, jamais réduit par ta
-production. Tu payes toujours le transport de ce que tu tires réellement du
-réseau, peu importe combien tu injectes par ailleurs.
+- **Énergie + taxes** : calculées sur le prélèvement net, **plafonné à
+  0**. Une journée où tu injectes plus que tu ne prélèves coûte **0** sur
+  cette composante — jamais un montant négatif. Sans compensation
+  contractuelle, Luminus n'a aucune obligation de te payer l'excédent, et
+  une taxe négative n'a pas de sens (ce serait une subvention, pas une
+  taxe).
+- **Réseau** (ELIA+ORES) : toujours calculé sur le prélèvement **brut**
+  en entier, jamais réduit par l'injection. Tu payes toujours le transport
+  de ce que tu tires réellement du réseau.
+- **Le coût total du jour ne peut donc jamais descendre en dessous du
+  coût réseau + coût fixe** — jamais 0€, jamais négatif, même une journée
+  très productive.
 
-Exemple concret : tu prélèves 10 kWh la nuit et injectes 15 kWh le jour.
-- `sensor.luminus_conso_jour` (prélèvement brut) = 10 kWh — jamais négatif,
-  la production du jour n'efface pas la conso de la nuit précédente.
-- `sensor.luminus_conso_nette_jour` = 10 − 15 = **−5 kWh**.
-- Coût variable = (−5 × prix énergie+taxes) + (10 × prix réseau) ≈ 0,51 €
-  au lieu de ~4,57 € sans compensation — la part énergie+taxes est
-  devenue négative et vient réduire la facture, mais le réseau reste dû
-  sur les 10 kWh réellement prélevés.
+Deux exemples concrets :
+- **Jour productif** : tu prélèves 5 kWh la nuit, injectes 10 kWh le jour.
+  Net = 5 − 10 = −5, plafonné à 0 → énergie+taxes = 0€. Réseau = 5 kWh ×
+  prix réseau. Total = coût réseau des 5 kWh prélevés + coût fixe.
+- **Jour classique** : tu prélèves 10 kWh, injectes 5 kWh. Net = 10 − 5 =
+  5 (positif, pas de plafonnement) → énergie+taxes sur 5 kWh. Réseau sur
+  la totalité des 10 kWh prélevés. Total = (5 kWh à prix plein) + (10 kWh
+  de réseau) + coût fixe.
 
-**Limite connue** : Luminus semble nettoyer prélèvement et injection sur
-la période de facturation complète (voir les index négatifs sur ton
-décompte), potentiellement plus fine que le jour (peut-être au quart
-d'heure). Ce système accumule les soldes nets **jour par jour** dans les
-totaux mensuel/annuel, ce qui revient mathématiquement au même sur une
-période complète (la somme de soldes journaliers nets = le net de la
-période) — donc l'estimation reste fiable en cumulé, même si le détail
-jour par jour ne reflète pas exactement la granularité utilisée par
-Luminus en interne.
+`sensor.luminus_conso_nette_jour` reste **non plafonné** et peut afficher
+un nombre négatif — c'est volontaire, pour que tu voies ton vrai solde de
+production. Ce n'est qu'au moment de calculer le coût que le plafond à 0
+s'applique.
+
+**Limite connue** : si Luminus t'accorde un jour une vraie compensation
+d'injection (ou si le régime "Injection: variable" s'active en 2030 comme
+annoncé), il faudra revoir ce plafonnement — un vrai contrat de rachat
+changerait la règle ci-dessus.
 
 ## Changement de tarif en cours d'année (ex. indexation Luminus en septembre)
 
