@@ -181,6 +181,22 @@ input_number:
     step: 0.01
     initial: 0
 
+  # --- Cumul net (prélèvement − injection) NON plafonné depuis le dernier
+  #     changement de prix énergie - c'est la vraie période de facturation
+  #     Luminus (voir "Vérification contre un vrai décompte"). Un jour très
+  #     négatif (grosse injection) peut ainsi compenser un autre jour de la
+  #     MÊME période, exactement comme Luminus le fait. Remis à 0
+  #     automatiquement à chaque application d'un changement de prix
+  #     programmé. Ne pas modifier manuellement. ---
+  luminus_net_cumule_periode:
+    name: "Luminus - Cumul net de la période tarifaire (interne)"
+    icon: mdi:scale-balance
+    unit_of_measurement: "kWh"
+    min: -20000
+    max: 20000
+    step: 0.001
+    initial: 0
+
   # --- Changement de prix programmé à l'avance (ex. indexation Luminus
   #     annoncée pour le 15/09 : encode-le dès que tu reçois le courrier,
   #     il s'appliquera tout seul le bon jour). ---
@@ -421,6 +437,7 @@ template:
           - sensor.luminus_injection_jour
           - input_number.luminus_cout_accumulateur_mois
           - input_number.luminus_cout_accumulateur_annee
+          - input_number.luminus_net_cumule_periode
     sensor:
       - name: "Luminus Prix kWh EUR"
         unique_id: luminus_prix_kwh_eur
@@ -448,19 +465,26 @@ template:
         unit_of_measurement: "EUR"
         device_class: monetary
         state: >
-          {# Énergie + taxes : sur le prélèvement NET, PLAFONNÉ À 0 (pas de
-             compensation d'injection sur ce contrat -> jamais de montant
-             négatif, une journée très productive coûte 0 sur cette
-             composante, pas moins que 0).
-             Réseau : sur le prélèvement BRUT en entier, toujours, peu
-             importe l'injection (le transport de ce que tu as réellement
-             tiré du réseau reste dû). #}
+          {# Énergie + taxes : méthode "waterfall" sur le CUMUL de la
+             période tarifaire (depuis le dernier changement de prix), pas
+             sur le jour isolé. Un jour très négatif (grosse injection)
+             compense les autres jours de la MÊME période, exactement
+             comme Luminus le fait sur un vrai décompte (regroupement par
+             période de prix, jamais par jour). Le plafond à 0 s'applique
+             seulement au niveau du CUMUL, pas jour par jour : on ne
+             facture que la portion qui fait dépasser le cumul au-dessus
+             de zéro aujourd'hui.
+             Réseau : sur le prélèvement BRUT du jour, en entier, toujours
+             (le transport de ce que tu as réellement tiré du réseau reste
+             dû, peu importe l'injection). #}
           {% set prelevement = states('sensor.luminus_conso_jour') | float(0) %}
           {% set injection = states('sensor.luminus_injection_jour') | float(0) %}
-          {% set net_facturable = [prelevement - injection, 0] | max %}
+          {% set cumule_avant = states('input_number.luminus_net_cumule_periode') | float(0) %}
+          {% set cumule_maintenant = cumule_avant + (prelevement - injection) %}
+          {% set net_facturable_aujourdhui = ([cumule_maintenant, 0] | max) - ([cumule_avant, 0] | max) %}
           {% set prix_energie_taxes = states('sensor.luminus_prix_energie_taxes_ttc') | float(0) / 100 %}
           {% set prix_reseau = states('sensor.luminus_prix_reseau_ttc') | float(0) / 100 %}
-          {{ ((net_facturable * prix_energie_taxes) + (prelevement * prix_reseau)) | round(4) }}
+          {{ ((net_facturable_aujourdhui * prix_energie_taxes) + (prelevement * prix_reseau)) | round(4) }}
 
       - name: "Luminus Cout Total Jour"
         unique_id: luminus_cout_total_jour
@@ -525,9 +549,17 @@ automation:
           prix_energie_taxes: "{{ states('sensor.luminus_prix_energie_taxes_ttc') | float(0) / 100 }}"
           prix_reseau: "{{ states('sensor.luminus_prix_reseau_ttc') | float(0) / 100 }}"
           cout_fixe_hier: "{{ states('sensor.luminus_cout_fixe_journalier') | float(0) }}"
+          cumule_avant: "{{ states('input_number.luminus_net_cumule_periode') | float(0) }}"
           date_hier: "{{ (now() - timedelta(days=1)).strftime('%d/%m/%Y') }}"
       - variables:
-          net_facturable_hier: "{{ [prelevement_hier - injection_hier, 0] | max }}"
+          # Waterfall sur le cumul de la période tarifaire (pas plafonné
+          # jour par jour - voir le commentaire de "Luminus Cout Variable
+          # Jour"). Un jour très négatif compense les autres jours de la
+          # même période avant que le changement de prix suivant ne
+          # remette ce cumul à 0.
+          cumule_apres: "{{ cumule_avant + (prelevement_hier - injection_hier) }}"
+      - variables:
+          net_facturable_hier: "{{ ([cumule_apres, 0] | max) - ([cumule_avant, 0] | max) }}"
       - variables:
           cout_variable_hier: "{{ (net_facturable_hier * prix_energie_taxes) + (prelevement_hier * prix_reseau) }}"
           cout_total_hier: "{{ ((net_facturable_hier * prix_energie_taxes) + (prelevement_hier * prix_reseau) + cout_fixe_hier) | round(4) }}"
@@ -535,7 +567,7 @@ automation:
         data:
           title: "Coût électricité Luminus - {{ date_hier }}"
           message: >
-            Prélèvement : {{ prelevement_hier | round(3) }} kWh — Injection : {{ injection_hier | round(3) }} kWh — Net facturable : {{ net_facturable_hier | round(3) }} kWh
+            Prélèvement : {{ prelevement_hier | round(3) }} kWh — Injection : {{ injection_hier | round(3) }} kWh — Cumul de période : {{ cumule_apres | round(3) }} kWh
 
             Prix énergie+taxes : {{ states('sensor.luminus_prix_energie_taxes_ttc') }} c€/kWh — Prix réseau : {{ states('sensor.luminus_prix_reseau_ttc') }} c€/kWh (TTC)
 
@@ -545,6 +577,11 @@ automation:
 
             Coût total du jour : {{ cout_total_hier }} €
           notification_id: luminus_resume_quotidien
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_net_cumule_periode
+        data:
+          value: "{{ cumule_apres | round(3) }}"
       - action: input_number.set_value
         target:
           entity_id: input_number.luminus_cout_accumulateur_mois
@@ -644,6 +681,11 @@ automation:
       - action: input_number.set_value
         target:
           entity_id: input_number.luminus_prix_energie_ttc_prochain
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.luminus_net_cumule_periode
         data:
           value: 0
     mode: single
