@@ -448,16 +448,19 @@ template:
         unit_of_measurement: "EUR"
         device_class: monetary
         state: >
-          {# Énergie + taxes : sur le prélèvement NET (peut réduire le
-             coût, voire le rendre négatif un jour très productif).
-             Réseau : sur le prélèvement BRUT (jamais négatif, tu payes
-             toujours le transport de ce que tu as réellement tiré). #}
+          {# Énergie + taxes : sur le prélèvement NET, PLAFONNÉ À 0 (pas de
+             compensation d'injection sur ce contrat -> jamais de montant
+             négatif, une journée très productive coûte 0 sur cette
+             composante, pas moins que 0).
+             Réseau : sur le prélèvement BRUT en entier, toujours, peu
+             importe l'injection (le transport de ce que tu as réellement
+             tiré du réseau reste dû). #}
           {% set prelevement = states('sensor.luminus_conso_jour') | float(0) %}
           {% set injection = states('sensor.luminus_injection_jour') | float(0) %}
-          {% set net = prelevement - injection %}
+          {% set net_facturable = [prelevement - injection, 0] | max %}
           {% set prix_energie_taxes = states('sensor.luminus_prix_energie_taxes_ttc') | float(0) / 100 %}
           {% set prix_reseau = states('sensor.luminus_prix_reseau_ttc') | float(0) / 100 %}
-          {{ ((net * prix_energie_taxes) + (prelevement * prix_reseau)) | round(4) }}
+          {{ ((net_facturable * prix_energie_taxes) + (prelevement * prix_reseau)) | round(4) }}
 
       - name: "Luminus Cout Total Jour"
         unique_id: luminus_cout_total_jour
