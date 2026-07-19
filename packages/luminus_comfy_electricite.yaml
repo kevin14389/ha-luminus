@@ -239,14 +239,13 @@ input_button:
 # =============================================================================
 # Suivi de la consommation - basé sur le compteur communicant
 # =============================================================================
-# Le compteur expose deux registres de PRÉLÈVEMENT séparés ("delivered" =
-# tiré du réseau, pas injecté) : peak (jour) et offpeak (nuit) - comme un
-# compteur bi-horaire, même si Luminus facture tout au même tarif mono-
-# horaire. Il faut additionner les deux pour avoir le prélèvement total :
-# suivre seulement "peak" sous-comptait toute la consommation de nuit.
-# (Le capteur combiné "Luminus Prélèvement Total" est défini dans le bloc
-# template plus bas, avec les autres capteurs calculés - HA n'autorise
-# qu'une seule clé "template:" par fichier.)
+# Le compteur expose des registres séparés jour/nuit pour le PRÉLÈVEMENT
+# ("delivered", tiré du réseau) et pour l'INJECTION ("returned", renvoyé au
+# réseau) - Luminus facture tout au même tarif mono-horaire, mais il faut
+# additionner peak+offpeak pour avoir chaque total. (Les capteurs combinés
+# "Luminus Prélèvement Total" et "Luminus Injection Totale" sont définis
+# dans le bloc template plus bas - HA n'autorise qu'une seule clé
+# "template:" par fichier.)
 utility_meter:
   # Pas de "name:" ici volontairement : quand un nom est fourni, HA génère
   # l'entity_id en le slugifiant (ex. "Consommation de l'année" devient
@@ -268,6 +267,18 @@ utility_meter:
     source: sensor.luminus_prelevement_total
     cycle: yearly
 
+  luminus_injection_jour:
+    source: sensor.luminus_injection_totale
+    cycle: daily
+
+  luminus_injection_mois:
+    source: sensor.luminus_injection_totale
+    cycle: monthly
+
+  luminus_injection_annee:
+    source: sensor.luminus_injection_totale
+    cycle: yearly
+
 # =============================================================================
 # Calcul du prix et du coût
 # =============================================================================
@@ -277,6 +288,8 @@ template:
         entity_id:
           - sensor.daily_energy_delivered_peak
           - sensor.daily_energy_delivered_offpeak
+          - sensor.daily_energy_returned_peak
+          - sensor.daily_energy_returned_offpeak
     sensor:
       - name: "Luminus Prélèvement Total"
         unique_id: luminus_prelevement_total
@@ -287,6 +300,17 @@ template:
         state: >
           {% set peak = states('sensor.daily_energy_delivered_peak') | float(0) %}
           {% set offpeak = states('sensor.daily_energy_delivered_offpeak') | float(0) %}
+          {{ (peak + offpeak) | round(3) }}
+
+      - name: "Luminus Injection Totale"
+        unique_id: luminus_injection_totale
+        icon: mdi:transmission-tower-export
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: >
+          {% set peak = states('sensor.daily_energy_returned_peak') | float(0) %}
+          {% set offpeak = states('sensor.daily_energy_returned_offpeak') | float(0) %}
           {{ (peak + offpeak) | round(3) }}
 
   - trigger:
@@ -308,8 +332,8 @@ template:
           - input_boolean.luminus_remise_fidelite_active
           - input_datetime.luminus_date_debut_contrat
     sensor:
-      - name: "Luminus Prix kWh TTC"
-        unique_id: luminus_prix_kwh_ttc
+      - name: "Luminus Prix Energie Taxes TTC"
+        unique_id: luminus_prix_energie_taxes_ttc
         icon: mdi:cash-multiple
         unit_of_measurement: "c€/kWh"
         state: >
@@ -332,15 +356,43 @@ template:
             {% endif %}
           {% endif %}
 
-          {# Coûts réseau combiné (ELIA+ORES), énergie verte et taxes, tous HTVA #}
-          {% set reseau = states('input_number.ores_cout_reseau_variable') | float(0) %}
+          {# Énergie verte et taxes, tous HTVA. Ce taux s'applique au
+             PRÉLÈVEMENT NET (prélèvement − injection), qui peut être
+             négatif un jour très productif - voir "Luminus Conso Nette
+             Jour" plus bas. #}
           {% set energie_verte = states('input_number.luminus_cout_energie_verte') | float(0) %}
           {% set accise = states('input_number.taxe_accise_special') | float(0) %}
           {% set cotisation = states('input_number.taxe_cotisation_energie') | float(0) %}
           {% set raccordement = states('input_number.taxe_redevance_raccordement') | float(0) %}
 
-          {% set total_ht = energie_ht + reseau + energie_verte + accise + cotisation + raccordement %}
+          {% set total_ht = energie_ht + energie_verte + accise + cotisation + raccordement %}
           {{ (total_ht * (1 + tva / 100)) | round(4) }}
+
+      - name: "Luminus Prix Reseau TTC"
+        unique_id: luminus_prix_reseau_ttc
+        icon: mdi:transmission-tower
+        unit_of_measurement: "c€/kWh"
+        state: >
+          {# Coût réseau combiné (ELIA+ORES), HTVA. Ce taux s'applique au
+             PRÉLÈVEMENT BRUT (jamais négatif) : le réseau se paie sur ce
+             que tu tires réellement, une production excédentaire n'annule
+             pas ce poste, seulement l'énergie/les taxes ci-dessus. #}
+          {% set tva = states('input_number.taux_tva') | float(0) %}
+          {% set reseau = states('input_number.ores_cout_reseau_variable') | float(0) %}
+          {{ (reseau * (1 + tva / 100)) | round(4) }}
+
+      - name: "Luminus Prix kWh TTC"
+        unique_id: luminus_prix_kwh_ttc
+        icon: mdi:cash-multiple
+        unit_of_measurement: "c€/kWh"
+        state: >
+          {# Prix informatif "tout compris" (énergie+taxes+réseau), utile
+             pour comparer ou brancher sur le Tableau de bord Énergie - ne
+             sert PAS au calcul du coût réel, qui distingue net et brut
+             (voir Luminus Cout Variable Jour). #}
+          {% set energie_taxes = states('sensor.luminus_prix_energie_taxes_ttc') | float(0) %}
+          {% set reseau = states('sensor.luminus_prix_reseau_ttc') | float(0) %}
+          {{ (energie_taxes + reseau) | round(4) }}
 
       - name: "Luminus Cout Fixe Journalier"
         unique_id: luminus_cout_fixe_journalier
@@ -360,10 +412,13 @@ template:
       - trigger: state
         entity_id:
           - sensor.luminus_prix_kwh_ttc
+          - sensor.luminus_prix_energie_taxes_ttc
+          - sensor.luminus_prix_reseau_ttc
           - sensor.luminus_cout_fixe_journalier
           - sensor.luminus_conso_jour
           - sensor.luminus_conso_mois
           - sensor.luminus_conso_annee
+          - sensor.luminus_injection_jour
           - input_number.luminus_cout_accumulateur_mois
           - input_number.luminus_cout_accumulateur_annee
     sensor:
@@ -375,15 +430,34 @@ template:
         state: >
           {{ (states('sensor.luminus_prix_kwh_ttc') | float(0) / 100) | round(6) }}
 
+      - name: "Luminus Conso Nette Jour"
+        unique_id: luminus_conso_nette_jour
+        icon: mdi:transmission-tower
+        unit_of_measurement: "kWh"
+        state: >
+          {# Prélèvement − injection. Peut être négatif un jour très
+             productif (tu injectes plus que tu ne prélèves) : ce n'est
+             pas un bug, ça réduit d'autant l'énergie+taxes facturées. #}
+          {% set prelevement = states('sensor.luminus_conso_jour') | float(0) %}
+          {% set injection = states('sensor.luminus_injection_jour') | float(0) %}
+          {{ (prelevement - injection) | round(3) }}
+
       - name: "Luminus Cout Variable Jour"
         unique_id: luminus_cout_variable_jour
         icon: mdi:flash
         unit_of_measurement: "EUR"
         device_class: monetary
         state: >
-          {% set kwh = states('sensor.luminus_conso_jour') | float(0) %}
-          {% set prix = states('sensor.luminus_prix_kwh_ttc') | float(0) / 100 %}
-          {{ (kwh * prix) | round(4) }}
+          {# Énergie + taxes : sur le prélèvement NET (peut réduire le
+             coût, voire le rendre négatif un jour très productif).
+             Réseau : sur le prélèvement BRUT (jamais négatif, tu payes
+             toujours le transport de ce que tu as réellement tiré). #}
+          {% set prelevement = states('sensor.luminus_conso_jour') | float(0) %}
+          {% set injection = states('sensor.luminus_injection_jour') | float(0) %}
+          {% set net = prelevement - injection %}
+          {% set prix_energie_taxes = states('sensor.luminus_prix_energie_taxes_ttc') | float(0) / 100 %}
+          {% set prix_reseau = states('sensor.luminus_prix_reseau_ttc') | float(0) / 100 %}
+          {{ ((net * prix_energie_taxes) + (prelevement * prix_reseau)) | round(4) }}
 
       - name: "Luminus Cout Total Jour"
         unique_id: luminus_cout_total_jour
@@ -391,10 +465,9 @@ template:
         unit_of_measurement: "EUR"
         device_class: monetary
         state: >
-          {% set kwh = states('sensor.luminus_conso_jour') | float(0) %}
-          {% set prix = states('sensor.luminus_prix_kwh_ttc') | float(0) / 100 %}
+          {% set variable = states('sensor.luminus_cout_variable_jour') | float(0) %}
           {% set fixe = states('sensor.luminus_cout_fixe_journalier') | float(0) %}
-          {{ ((kwh * prix) + fixe) | round(4) }}
+          {{ (variable + fixe) | round(4) }}
 
       - name: "Luminus Cout Total Mois"
         unique_id: luminus_cout_total_mois
@@ -445,9 +518,9 @@ automation:
         data:
           title: "Coût électricité Luminus - {{ now().strftime('%d/%m/%Y') }}"
           message: >
-            Consommation : {{ states('sensor.luminus_conso_jour') }} kWh
+            Prélèvement : {{ states('sensor.luminus_conso_jour') }} kWh — Injection : {{ states('sensor.luminus_injection_jour') }} kWh — Net : {{ states('sensor.luminus_conso_nette_jour') }} kWh
 
-            Prix appliqué : {{ states('sensor.luminus_prix_kwh_ttc') }} c€/kWh (TTC)
+            Prix énergie+taxes : {{ states('sensor.luminus_prix_energie_taxes_ttc') }} c€/kWh — Prix réseau : {{ states('sensor.luminus_prix_reseau_ttc') }} c€/kWh (TTC)
 
             Coût variable : {{ states('sensor.luminus_cout_variable_jour') }} €
 
