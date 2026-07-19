@@ -27,12 +27,12 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
      packages: !include_dir_named packages
    ```
 
-3. Vérifie l'entité source de consommation dans
-   `packages/luminus_comfy_electricite.yaml` (section `utility_meter`) :
-   elle est actuellement réglée sur `sensor.daily_energy_delivered_peak`
-   (ton capteur de consommation nette du compteur communicant). Si cette
-   entity_id change un jour (changement d'intégration, etc.), mets à jour
-   les 3 occurrences dans le fichier.
+3. Vérifie les 4 entités sources du compteur communicant, référencées dans
+   le premier bloc `template:` de `packages/luminus_comfy_electricite.yaml` :
+   `sensor.daily_energy_delivered_peak` / `_offpeak` (prélèvement jour/nuit)
+   et `sensor.daily_energy_returned_peak` / `_offpeak` (injection jour/nuit).
+   Si ces entity_id changent un jour (changement d'intégration, etc.),
+   mets-les à jour à cet endroit.
 4. Redémarre Home Assistant (nécessaire pour que les nouvelles aides
    `input_number` / `input_boolean` / `input_datetime` apparaissent).
 5. Va dans **Paramètres > Appareils et services > Aides** pour vérifier /
@@ -41,20 +41,29 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 
 ## Entités créées
 
-### Compteurs de consommation (`utility_meter`)
-- `sensor.luminus_conso_jour` — consommation nette du jour (kWh)
-- `sensor.luminus_conso_mois` — consommation nette du mois (kWh)
-- `sensor.luminus_conso_annee` — consommation nette de l'année (kWh)
+### Prélèvement et injection combinés (`template`, jour+nuit additionnés)
+- `sensor.luminus_prelevement_total` — prélèvement réseau total (kWh)
+- `sensor.luminus_injection_totale` — injection réseau totale (kWh)
+
+### Compteurs journaliers/mensuels/annuels (`utility_meter`)
+- `sensor.luminus_conso_jour` / `_mois` / `_annee` — prélèvement brut (kWh)
+- `sensor.luminus_injection_jour` / `_mois` / `_annee` — injection (kWh)
 
 ### Prix et coûts (`template`)
-- `sensor.luminus_prix_kwh_ttc` — prix tout compris (énergie + réseau +
-  taxes + TVA) en c€/kWh
-- `sensor.luminus_prix_kwh_eur` — le même prix en EUR/kWh (à utiliser comme
-  "entité de prix" dans le Tableau de bord Énergie de Home Assistant)
+- `sensor.luminus_prix_energie_taxes_ttc` — taux énergie + taxes (c€/kWh),
+  s'applique au prélèvement **net**
+- `sensor.luminus_prix_reseau_ttc` — taux réseau ELIA+ORES (c€/kWh),
+  s'applique au prélèvement **brut**
+- `sensor.luminus_prix_kwh_ttc` — somme des deux, taux informatif "tout
+  compris" (à utiliser comme "entité de prix" dans le Tableau de bord
+  Énergie de Home Assistant si tu veux une estimation simple)
+- `sensor.luminus_prix_kwh_eur` — `luminus_prix_kwh_ttc` en EUR/kWh
+- `sensor.luminus_conso_nette_jour` — prélèvement − injection du jour (kWh,
+  **peut être négatif** un jour très productif)
 - `sensor.luminus_cout_fixe_journalier` — quote-part journalière des coûts
   fixes (redevance Luminus + terme fixe GRD), en €
-- `sensor.luminus_cout_variable_jour` — coût variable du jour (conso ×
-  prix), en €
+- `sensor.luminus_cout_variable_jour` — coût variable du jour : (net ×
+  prix énergie+taxes) + (brut × prix réseau), en €
 - `sensor.luminus_cout_total_jour` — coût total du jour (variable + fixe), en €
 - `sensor.luminus_cout_total_mois` / `sensor.luminus_cout_total_annee` —
   total réel cumulé du mois / de l'année en cours (voir "Changement de tarif
@@ -104,13 +113,12 @@ cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
   version (erreur corrigée après analyse d'un vrai décompte), le tarif
   prosumer (€/kW/an) ne s'applique qu'aux compteurs analogiques inversés.
   Avec un compteur digital, ELIA + ORES facturent le réseau sur le
-  prélèvement **brut** (avant compensation par ta production), avec un
-  "Ristorno" (remise) pour la production décentralisée — un mécanisme que
-  ce package ne peut pas suivre en détail puisqu'il ne mesure que ta
-  consommation nette. À la place, `ores_cout_reseau_variable` est un taux
-  **moyen réel**, calculé une fois par an à partir de ton décompte (voir
+  prélèvement **brut**, avec un "Ristorno" (remise) pour la production
+  décentralisée — un mécanisme trop fin pour être reproduit composante par
+  composante. À la place, `ores_cout_reseau_variable` est un taux **moyen
+  réel**, calculé une fois par an à partir de ton décompte (voir
   "Vérification contre un vrai décompte"), qui redonne le bon coût annuel
-  total sans suivre les kWh bruts.
+  total.
 - **TVA 6 %**, appliquée globalement sur l'énergie (après remise éventuelle)
   + coûts énergie verte + coût réseau + taxes. La redevance fixe annuelle
   Luminus (65 €/an) est déjà TVA incluse sur le décompte et n'est donc pas
@@ -157,6 +165,44 @@ le surestime un peu en été (forte autoconsommation) — mais il redonne le
 bon total sur une année complète, ce qui est cohérent avec l'objectif de ce
 système (suivi/estimation, pas facture officielle). Recalcule cette
 formule à chaque nouveau décompte annuel pour rester calé sur la réalité.
+
+## Compensation prélèvement / injection (journées "négatives")
+
+Ton compteur communicant expose deux registres séparés (prélèvement et
+injection, chacun avec un sous-registre jour/nuit) — le système additionne
+peak+offpeak pour chacun, puis calcule le solde net (prélèvement −
+injection) chaque jour.
+
+Ce net peut être **négatif** un jour où tu produis plus que tu ne
+consommes : dans ce cas, la part "énergie + taxes" du coût du jour diminue
+(voire devient négative, agissant comme un crédit) — cohérent avec ce que
+montre ton vrai décompte annuel, où les périodes d'injection sont
+directement soustraites de la consommation facturée par Luminus et le
+gouvernement.
+
+**Ce qui ne change jamais** : le coût **réseau** (ELIA+ORES), lui, reste
+calculé sur ton prélèvement **brut** — jamais négatif, jamais réduit par ta
+production. Tu payes toujours le transport de ce que tu tires réellement du
+réseau, peu importe combien tu injectes par ailleurs.
+
+Exemple concret : tu prélèves 10 kWh la nuit et injectes 15 kWh le jour.
+- `sensor.luminus_conso_jour` (prélèvement brut) = 10 kWh — jamais négatif,
+  la production du jour n'efface pas la conso de la nuit précédente.
+- `sensor.luminus_conso_nette_jour` = 10 − 15 = **−5 kWh**.
+- Coût variable = (−5 × prix énergie+taxes) + (10 × prix réseau) ≈ 0,51 €
+  au lieu de ~4,57 € sans compensation — la part énergie+taxes est
+  devenue négative et vient réduire la facture, mais le réseau reste dû
+  sur les 10 kWh réellement prélevés.
+
+**Limite connue** : Luminus semble nettoyer prélèvement et injection sur
+la période de facturation complète (voir les index négatifs sur ton
+décompte), potentiellement plus fine que le jour (peut-être au quart
+d'heure). Ce système accumule les soldes nets **jour par jour** dans les
+totaux mensuel/annuel, ce qui revient mathématiquement au même sur une
+période complète (la somme de soldes journaliers nets = le net de la
+période) — donc l'estimation reste fiable en cumulé, même si le détail
+jour par jour ne reflète pas exactement la granularité utilisée par
+Luminus en interne.
 
 ## Changement de tarif en cours d'année (ex. indexation Luminus en septembre)
 
@@ -206,11 +252,13 @@ deviner rétroactivement qu'une erreur a eu lieu.
 
 Pour rattraper ces 10 jours :
 
-1. Regarde dans l'historique de `sensor.luminus_conso_jour` (ou les
-   statistiques Énergie) le total de kWh consommés entre le 15 et le 24/09.
-2. Calcule l'écart de prix : (nouveau prix − ancien prix) en EUR/kWh
-   (`sensor.luminus_prix_kwh_ttc` divisé par 100, avant et après).
-3. Multiplie les deux : `kWh_manqués × écart_prix` = montant en euros
+1. Regarde dans l'historique de `sensor.luminus_conso_nette_jour` (ou les
+   statistiques Énergie) le total de kWh nets entre le 15 et le 24/09.
+2. Calcule l'écart de prix : (nouveau prix − ancien prix) en EUR/kWh sur
+   `sensor.luminus_prix_energie_taxes_ttc` (divisé par 100, avant et
+   après) — c'est ce taux-là qui bouge lors d'une indexation Luminus, pas
+   le taux réseau.
+3. Multiplie les deux : `kWh_nets_manqués × écart_prix` = montant en euros
    (positif si tu as sous-compté, négatif si tu as sur-compté).
 4. Entre ce montant dans `input_number.luminus_correction_manuelle`.
 5. Appuie sur `input_button.luminus_appliquer_correction_manuelle` : le
@@ -229,9 +277,13 @@ type: entities
 title: Électricité - Luminus
 entities:
   - entity: sensor.luminus_conso_jour
-    name: Consommation du jour
+    name: Prélèvement du jour
+  - entity: sensor.luminus_injection_jour
+    name: Injection du jour
+  - entity: sensor.luminus_conso_nette_jour
+    name: Solde net du jour
   - entity: sensor.luminus_prix_kwh_ttc
-    name: Prix actuel (TTC)
+    name: Prix actuel (indicatif, TTC)
   - entity: sensor.luminus_cout_total_jour
     name: Coût du jour
   - entity: sensor.luminus_cout_total_mois
