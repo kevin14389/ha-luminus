@@ -237,8 +237,16 @@ input_button:
     icon: mdi:calculator-variant
 
 # =============================================================================
-# Suivi de la consommation - basé sur le capteur du compteur communicant
+# Suivi de la consommation - basé sur le compteur communicant
 # =============================================================================
+# Le compteur expose deux registres de PRÉLÈVEMENT séparés ("delivered" =
+# tiré du réseau, pas injecté) : peak (jour) et offpeak (nuit) - comme un
+# compteur bi-horaire, même si Luminus facture tout au même tarif mono-
+# horaire. Il faut additionner les deux pour avoir le prélèvement total :
+# suivre seulement "peak" sous-comptait toute la consommation de nuit.
+# (Le capteur combiné "Luminus Prélèvement Total" est défini dans le bloc
+# template plus bas, avec les autres capteurs calculés - HA n'autorise
+# qu'une seule clé "template:" par fichier.)
 utility_meter:
   # Pas de "name:" ici volontairement : quand un nom est fourni, HA génère
   # l'entity_id en le slugifiant (ex. "Consommation de l'année" devient
@@ -249,21 +257,38 @@ utility_meter:
   # Tu peux renommer l'affichage ("friendly name") depuis Paramètres >
   # Entités sans risque, ça ne touche pas l'entity_id.
   luminus_conso_jour:
-    source: sensor.daily_energy_delivered_peak
+    source: sensor.luminus_prelevement_total
     cycle: daily
 
   luminus_conso_mois:
-    source: sensor.daily_energy_delivered_peak
+    source: sensor.luminus_prelevement_total
     cycle: monthly
 
   luminus_conso_annee:
-    source: sensor.daily_energy_delivered_peak
+    source: sensor.luminus_prelevement_total
     cycle: yearly
 
 # =============================================================================
 # Calcul du prix et du coût
 # =============================================================================
 template:
+  - trigger:
+      - trigger: state
+        entity_id:
+          - sensor.daily_energy_delivered_peak
+          - sensor.daily_energy_delivered_offpeak
+    sensor:
+      - name: "Luminus Prélèvement Total"
+        unique_id: luminus_prelevement_total
+        icon: mdi:transmission-tower-import
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        state: >
+          {% set peak = states('sensor.daily_energy_delivered_peak') | float(0) %}
+          {% set offpeak = states('sensor.daily_energy_delivered_offpeak') | float(0) %}
+          {{ (peak + offpeak) | round(3) }}
+
   - trigger:
       - trigger: time_pattern
         minutes: "/15"
