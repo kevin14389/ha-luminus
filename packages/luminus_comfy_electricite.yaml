@@ -723,3 +723,39 @@ automation:
         data:
           value: 0
     mode: single
+
+  - id: luminus_verification_accumulateurs
+    alias: "Luminus - Vérification des accumulateurs au démarrage"
+    description: >
+      Un incident (ex. mise à jour Home Assistant) peut réinitialiser les
+      accumulateurs internes à 0 sans prévenir. Cette vérification tourne à
+      chaque démarrage de Home Assistant : si on n'est plus dans les tout
+      premiers jours du mois/de l'année et qu'un accumulateur est à 0,
+      c'est suspect (une remise à 0 légitime n'arrive que le 1er du mois
+      ou le 1er janvier) - alerte immédiatement plutôt que de laisser
+      passer inaperçu.
+    trigger:
+      - trigger: homeassistant
+        event: start
+    action:
+      - delay:
+          seconds: 30
+      - condition: template
+        value_template: >
+          {{ (now().day > 2 and states('input_number.luminus_cout_accumulateur_mois') | float(-1) == 0)
+             or (now().timetuple().tm_yday > 2 and states('input_number.luminus_cout_accumulateur_annee') | float(-1) == 0) }}
+      - action: persistent_notification.create
+        data:
+          title: "⚠️ Luminus - Accumulateur suspect à 0"
+          message: >
+            Au démarrage de Home Assistant, un accumulateur interne est à 0
+            alors qu'on n'est pas en tout début de mois/d'année
+            (accumulateur_mois = {{ states('input_number.luminus_cout_accumulateur_mois') }} €,
+            accumulateur_annee = {{ states('input_number.luminus_cout_accumulateur_annee') }} €).
+
+            Ça ressemble à une perte de données (ex. suite à une mise à
+            jour de Home Assistant) plutôt qu'à un vrai reset légitime.
+            Vérifie l'historique de ces entités pour restaurer la dernière
+            valeur correcte si besoin.
+          notification_id: luminus_accumulateur_suspect
+    mode: single
