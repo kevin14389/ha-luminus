@@ -8,17 +8,25 @@ de prix programmé, et vérification de cohérence au démarrage.
 
 from __future__ import annotations
 
+import calendar
 import logging
+import re
 from datetime import timedelta
+
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import event as event_helper
 from homeassistant.util import dt as dt_util
 
 from . import calculations as calc
 from .const import (
+    ATTR_CONSOMMATION_KWH,
+    ATTR_MOIS,
+    ATTR_PRODUCTION_KWH,
     CONF_DELIVERED_OFFPEAK,
     CONF_DELIVERED_PEAK,
     CONF_RETURNED_OFFPEAK,
@@ -30,13 +38,23 @@ from .const import (
     DOMAIN,
     NUM_PRIX_ENERGIE_TTC,
     NUM_PRIX_ENERGIE_TTC_PROCHAIN,
+    SERVICE_DEFINIR_MOIS_HISTORIQUE,
     SWITCH_CHANGEMENT_PRIX_PROGRAMME,
 )
 from .store import LuminusStore
 
 _LOGGER = logging.getLogger(__name__)
+_MOIS_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 PLATFORMS = ["sensor", "number", "switch", "date", "button"]
+
+_SET_MOIS_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_MOIS): str,
+        vol.Required(ATTR_CONSOMMATION_KWH): vol.Coerce(float),
+        vol.Required(ATTR_PRODUCTION_KWH): vol.Coerce(float),
+    }
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -95,6 +113,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _startup)
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_DEFINIR_MOIS_HISTORIQUE):
+        async def _handle_definir_mois(call: ServiceCall) -> None:
+            await _async_definir_mois_historique(hass, entry, call)
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_DEFINIR_MOIS_HISTORIQUE,
+            _handle_definir_mois,
+            schema=_SET_MOIS_SCHEMA,
+        )
+
     return True
 
 
@@ -102,6 +131,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        if not hass.data[DOMAIN]:
+            hass.services.async_remove(DOMAIN, SERVICE_DEFINIR_MOIS_HISTORIQUE)
     return unloaded
 
 
@@ -160,6 +191,7 @@ async def _async_daily_closeout(hass: HomeAssistant, entry: ConfigEntry) -> None
     # Crédite le jour qui vient de se terminer AVANT de vérifier un
     # éventuel changement de mois/année, pour qu'il compte dans la
     # bonne période (voir ordre équivalent dans le package YAML d'origine).
+    await store.async_ajouter_kwh_mois(prelevement_hier, injection_hier)
     await store.async_ajouter_cout_mois(cout_total_hier)
     await store.async_ajouter_cout_annee(cout_total_hier)
 
@@ -167,7 +199,12 @@ async def _async_daily_closeout(hass: HomeAssistant, entry: ConfigEntry) -> None
     mois_str = today.strftime("%Y-%m")
     annee_str = today.strftime("%Y")
     if store.mois_courant != mois_str:
+        # Archive le mois qui vient de se terminer (totaux kWh + coût
+        # réel déjà accumulé jour par jour, donc toujours exact même si
+        # le prix a changé en cours de mois) avant de le remettre à 0.
+        await _async_archiver_mois_auto(hass, entry, store.mois_courant)
         await store.async_reset_mois(mois_str)
+        await store.async_reset_kwh_mois()
     if store.annee_courante != annee_str:
         await store.async_reset_annee(annee_str)
 
@@ -182,6 +219,41 @@ async def _async_daily_closeout(hass: HomeAssistant, entry: ConfigEntry) -> None
             f"Coût total du jour : {cout_total_hier} €"
         ),
         "luminus_resume_quotidien",
+    )
+
+
+async def _async_archiver_mois_auto(hass: HomeAssistant, entry: ConfigEntry, mois: str) -> None:
+    """Archive le mois qui vient de se terminer dans l'historique, sauf
+    s'il a déjà été saisi manuellement (service definir_mois_historique)
+    - une saisie manuelle n'est jamais écrasée automatiquement."""
+    if not mois:
+        return
+    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
+    existant = store.historique_mois(mois)
+    if existant is not None and existant.get("source") == "manuel":
+        return
+
+    conso = store.conso_mois_kwh
+    injection = store.injection_mois_kwh
+    # Le coût est déjà exact (accumulé jour par jour, donc correct même
+    # si le prix a changé en cours de mois) - pas besoin de le
+    # recalculer depuis les tarifs courants comme le fait resume_mois
+    # pour une saisie manuelle sans détail journalier.
+    cout_total_eur = store.accumulateur_mois
+    prix_moyen = round(cout_total_eur / conso, 4) if conso else 0.0
+
+    await store.async_set_historique_mois(
+        mois,
+        {
+            "consommation_kwh": round(conso, 3),
+            "production_kwh": round(injection, 3),
+            "solde_net_kwh": round(conso - injection, 3),
+            "cout_total_eur": round(cout_total_eur, 2),
+            "prix_moyen_kwh": prix_moyen,
+            "prix_energie_taxes_ttc": calc.prix_energie_taxes_ttc(hass),
+            "prix_reseau_ttc": calc.prix_reseau_ttc(hass),
+            "source": "auto",
+        },
     )
 
 
@@ -247,4 +319,50 @@ async def _async_verifier_accumulateurs(hass: HomeAssistant, entry: ConfigEntry)
             "une perte de données."
         ),
         "luminus_accumulateur_suspect",
+    )
+
+
+async def _async_definir_mois_historique(
+    hass: HomeAssistant, entry: ConfigEntry, call: ServiceCall
+) -> None:
+    """Service definir_mois_historique : saisie/correction manuelle d'un
+    mois (ex. import depuis MyOres). Calcule coût, prix moyen et solde
+    net automatiquement à partir des tarifs actuellement configurés -
+    voir calculations.resume_mois."""
+    mois: str = call.data[ATTR_MOIS]
+    if not _MOIS_RE.match(mois):
+        raise ServiceValidationError(
+            f"Format de mois invalide : {mois!r} (attendu AAAA-MM, ex. 2026-01)"
+        )
+    consommation_kwh = call.data[ATTR_CONSOMMATION_KWH]
+    production_kwh = call.data[ATTR_PRODUCTION_KWH]
+    if consommation_kwh < 0 or production_kwh < 0:
+        raise ServiceValidationError("La consommation et la production doivent être >= 0.")
+
+    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
+
+    annee, mois_num = (int(p) for p in mois.split("-"))
+    jours_du_mois = calendar.monthrange(annee, mois_num)[1]
+
+    resume = calc.resume_mois(
+        consommation_kwh,
+        production_kwh,
+        calc.prix_energie_taxes_ttc(hass),
+        calc.prix_reseau_ttc(hass),
+        calc.cout_fixe_journalier(hass),
+        jours_du_mois,
+    )
+    resume["source"] = "manuel"
+
+    await store.async_set_historique_mois(mois, resume)
+    await _async_notify(
+        hass,
+        f"Luminus - Mois {mois} enregistré",
+        (
+            f"Consommation : {resume['consommation_kwh']} kWh — "
+            f"Production : {resume['production_kwh']} kWh\n"
+            f"Coût total : {resume['cout_total_eur']} € — "
+            f"Prix moyen : {resume['prix_moyen_kwh']} €/kWh"
+        ),
+        f"luminus_mois_{mois}",
     )

@@ -150,3 +150,37 @@ def cout_variable(
     prix_rs = prix_reseau_ttc(hass) / 100
     cout = (facturable * prix_et) + (prelevement * prix_rs)
     return cumule_apres, round(cout, 4)
+
+
+def resume_mois(
+    consommation_kwh: float,
+    production_kwh: float,
+    prix_energie_taxes_ttc_c: float,
+    prix_reseau_ttc_c: float,
+    cout_fixe_journalier_eur: float,
+    jours_du_mois: int,
+) -> dict:
+    """Résumé d'un mois complet à partir de totaux kWh (pas d'un cumul
+    jour par jour) : utilisé pour l'archivage automatique ET pour la
+    saisie manuelle via le service definir_mois_historique. Traite le
+    mois comme sa propre "période" pour le plafonnement waterfall
+    (simplification : une saisie manuelle mensuelle via MyOres n'a pas
+    la granularité jour par jour pour faire un vrai cumul de période
+    tarifaire - voir le README)."""
+    net_facturable_kwh = max(consommation_kwh - production_kwh, 0)
+    cout_variable_eur = (net_facturable_kwh * prix_energie_taxes_ttc_c / 100) + (
+        consommation_kwh * prix_reseau_ttc_c / 100
+    )
+    cout_fixe_eur = cout_fixe_journalier_eur * jours_du_mois
+    cout_total_eur = round(cout_variable_eur + cout_fixe_eur, 2)
+    solde_net_kwh = round(consommation_kwh - production_kwh, 3)
+    prix_moyen_kwh = round(cout_total_eur / consommation_kwh, 4) if consommation_kwh else 0.0
+    return {
+        "consommation_kwh": round(consommation_kwh, 3),
+        "production_kwh": round(production_kwh, 3),
+        "solde_net_kwh": solde_net_kwh,
+        "cout_total_eur": cout_total_eur,
+        "prix_moyen_kwh": prix_moyen_kwh,
+        "prix_energie_taxes_ttc": prix_energie_taxes_ttc_c,
+        "prix_reseau_ttc": prix_reseau_ttc_c,
+    }

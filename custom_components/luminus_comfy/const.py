@@ -62,6 +62,12 @@ DATETIME_PRIX_ENERGIE_DATE_EFFET = "prix_energie_date_effet"
 # --- Button ---
 BUTTON_APPLIQUER_CORRECTION_MANUELLE = "appliquer_correction_manuelle"
 
+# --- Service de saisie/correction de l'historique mensuel ---
+SERVICE_DEFINIR_MOIS_HISTORIQUE = "definir_mois_historique"
+ATTR_MOIS = "mois"
+ATTR_CONSOMMATION_KWH = "consommation_kwh"
+ATTR_PRODUCTION_KWH = "production_kwh"
+
 # --- Store (accumulateurs persistés, indépendants de la restauration
 # d'état des entités - voir store.py) ---
 STORE_VERSION = 1
@@ -70,9 +76,17 @@ STORE_KEY_ACCUMULATEUR_ANNEE = "accumulateur_annee"
 STORE_KEY_NET_CUMULE_PERIODE = "net_cumule_periode"
 STORE_KEY_MOIS_COURANT = "mois_courant"  # "YYYY-MM" du dernier reset mensuel
 STORE_KEY_ANNEE_COURANTE = "annee_courante"  # "YYYY" du dernier reset annuel
+STORE_KEY_CONSO_MOIS_KWH = "conso_mois_kwh"  # cumul kWh prélevés du mois en cours
+STORE_KEY_INJECTION_MOIS_KWH = "injection_mois_kwh"  # cumul kWh injectés du mois en cours
+STORE_KEY_HISTORIQUE_MENSUEL = "historique_mensuel"  # {"YYYY-MM": {...}}
 
 # Heure de clôture quotidienne (juste après minuit, lit les totaux exacts
 # du cycle qui vient de se terminer - voir __init__.py)
 DAILY_CLOSEOUT_HOUR = 0
 DAILY_CLOSEOUT_MINUTE = 0
 DAILY_CLOSEOUT_SECOND = 30
+
+MOIS_FR = [
+    "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+    "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+]

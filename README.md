@@ -66,6 +66,58 @@ robuste face au bug de reset rencontré avec la version YAML après une
 mise à jour Home Assistant (voir plus bas), sans garantie absolue que ça
 l'élimine complètement si la cause était plus profonde.
 
+### Historique mensuel (consommation, production, coût par mois)
+
+L'intégration HACS archive automatiquement chaque mois terminé
+(`sensor.luminus_historique_mensuel`, attribut `mois` = liste détaillée)
+avec la consommation, la production, le coût total réel, le prix moyen
+par kWh et le solde net. Les mois à venir se remplissent tout seuls au
+fur et à mesure.
+
+**Pour importer l'historique déjà disponible sur MyOres** (ex. depuis le
+01/01/2026, avant l'installation de l'intégration) : va dans **Outils de
+développement → Actions**, cherche le service **"Luminus Comfy
+Électricité : Définir un mois dans l'historique"**, et renseigne pour
+chaque mois :
+- `mois` : `2026-01` pour janvier, `2026-02` pour février, etc.
+- `consommation_kwh` et `production_kwh` : les totaux du mois depuis MyOres.
+
+Le coût total, le prix moyen par kWh et le solde net sont **calculés et
+remplis automatiquement** à partir des tarifs actuellement configurés
+(`number.luminus_prix_energie_taxes_ttc`, etc.) — rien d'autre à
+remplir. Un mois saisi manuellement de cette façon n'est **jamais écrasé
+automatiquement** par l'archivage mensuel, même après l'installation de
+l'intégration.
+
+Exemple de carte Lovelace (type Markdown) pour afficher l'historique :
+
+```yaml
+type: markdown
+title: Historique mensuel - Luminus
+content: >
+  {% for m in state_attr('sensor.luminus_historique_mensuel', 'mois') | reverse %}
+  ### {{ m.mois_label }}
+  **Consommation :** {{ m.consommation_kwh }} kWh
+  **Production :** {{ m.production_kwh }} kWh
+  **Prix :** {{ m.cout_total_eur }} €
+  **Coût kWh :** {{ m.prix_moyen_kwh }} €/kWh
+  **Solde NET :** {{ m.solde_net_kwh }} kWh
+  {% if m.source == 'manuel' %}*(saisi manuellement)*{% endif %}
+
+  ---
+  {% endfor %}
+```
+
+**Limite connue** : pour un mois saisi manuellement, le coût est
+recalculé à partir des tarifs **actuels** (pas forcément ceux en
+vigueur ce mois-là si un changement de prix a eu lieu entre-temps) et
+en traitant le mois comme sa propre période de compensation (pas de
+cumul jour par jour faute de détail dans l'export MyOres) — une
+approximation raisonnable, mais potentiellement différente de quelques
+centimes du vrai décompte Luminus. Pour les mois archivés
+automatiquement par l'intégration, le coût est toujours exact (accumulé
+jour par jour avec le bon tarif à chaque fois).
+
 ## Installation manuelle (package YAML, méthode historique)
 
 1. Copie le dossier `packages/` de ce repo dans ton dossier de configuration

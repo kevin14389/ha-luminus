@@ -1,0 +1,39 @@
+definir_mois_historique:
+  name: Définir un mois dans l'historique
+  description: >-
+    Renseigne (ou corrige) la consommation et la production d'un mois
+    donné. Le coût total, le prix moyen par kWh et le solde net sont
+    recalculés automatiquement à partir des tarifs actuellement
+    configurés. Utile pour importer l'historique depuis MyOres.
+  fields:
+    mois:
+      name: Mois
+      description: Au format AAAA-MM, par exemple 2026-01 pour janvier 2026.
+      required: true
+      example: "2026-01"
+      selector:
+        text:
+    consommation_kwh:
+      name: Consommation (kWh)
+      description: Total prélevé du réseau ce mois-là, en kWh.
+      required: true
+      example: 350.5
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 0.1
+          mode: box
+          unit_of_measurement: kWh
+    production_kwh:
+      name: Production (kWh)
+      description: Total injecté sur le réseau ce mois-là, en kWh.
+      required: true
+      example: 120.3
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 0.1
+          mode: box
+          unit_of_measurement: kWh

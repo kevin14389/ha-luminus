@@ -22,6 +22,9 @@ from .const import (
     STORE_KEY_ACCUMULATEUR_ANNEE,
     STORE_KEY_ACCUMULATEUR_MOIS,
     STORE_KEY_ANNEE_COURANTE,
+    STORE_KEY_CONSO_MOIS_KWH,
+    STORE_KEY_HISTORIQUE_MENSUEL,
+    STORE_KEY_INJECTION_MOIS_KWH,
     STORE_KEY_MOIS_COURANT,
     STORE_KEY_NET_CUMULE_PERIODE,
     STORE_VERSION,
@@ -33,6 +36,9 @@ _DEFAULTS = {
     STORE_KEY_NET_CUMULE_PERIODE: 0.0,
     STORE_KEY_MOIS_COURANT: "",
     STORE_KEY_ANNEE_COURANTE: "",
+    STORE_KEY_CONSO_MOIS_KWH: 0.0,
+    STORE_KEY_INJECTION_MOIS_KWH: 0.0,
+    STORE_KEY_HISTORIQUE_MENSUEL: {},
 }
 
 
@@ -119,4 +125,42 @@ class LuminusStore:
 
     async def async_reset_net_cumule_periode(self) -> None:
         self._data[STORE_KEY_NET_CUMULE_PERIODE] = 0.0
+        await self._async_save()
+
+    # --- Cumuls kWh du mois en cours (prélèvement/injection brut), pour
+    # alimenter l'archivage automatique mensuel ---
+    @property
+    def conso_mois_kwh(self) -> float:
+        return self._data[STORE_KEY_CONSO_MOIS_KWH]
+
+    @property
+    def injection_mois_kwh(self) -> float:
+        return self._data[STORE_KEY_INJECTION_MOIS_KWH]
+
+    async def async_ajouter_kwh_mois(self, conso_kwh: float, injection_kwh: float) -> None:
+        self._data[STORE_KEY_CONSO_MOIS_KWH] = round(
+            self._data[STORE_KEY_CONSO_MOIS_KWH] + conso_kwh, 3
+        )
+        self._data[STORE_KEY_INJECTION_MOIS_KWH] = round(
+            self._data[STORE_KEY_INJECTION_MOIS_KWH] + injection_kwh, 3
+        )
+        await self._async_save()
+
+    async def async_reset_kwh_mois(self) -> None:
+        self._data[STORE_KEY_CONSO_MOIS_KWH] = 0.0
+        self._data[STORE_KEY_INJECTION_MOIS_KWH] = 0.0
+        await self._async_save()
+
+    # --- Historique mensuel archivé : {"YYYY-MM": {consommation_kwh,
+    # production_kwh, cout_total_eur, prix_energie_taxes_ttc,
+    # prix_reseau_ttc, source: "auto"|"manuel"}} ---
+    @property
+    def historique_mensuel(self) -> dict:
+        return self._data[STORE_KEY_HISTORIQUE_MENSUEL]
+
+    def historique_mois(self, mois: str) -> dict | None:
+        return self._data[STORE_KEY_HISTORIQUE_MENSUEL].get(mois)
+
+    async def async_set_historique_mois(self, mois: str, enregistrement: dict) -> None:
+        self._data[STORE_KEY_HISTORIQUE_MENSUEL][mois] = enregistrement
         await self._async_save()

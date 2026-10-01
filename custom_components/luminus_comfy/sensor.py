@@ -23,6 +23,7 @@ from .const import (
     CONF_RETURNED_OFFPEAK,
     CONF_RETURNED_PEAK,
     DOMAIN,
+    MOIS_FR,
     NUMBER_DEFINITIONS,
     SWITCH_CHANGEMENT_PRIX_PROGRAMME,
     SWITCH_REMISE_FIDELITE_ACTIVE,
@@ -52,6 +53,7 @@ async def async_setup_entry(
         CoutTotalJourSensor(entry, conf, store),
         CoutTotalMoisSensor(entry, conf, store),
         CoutTotalAnneeSensor(entry, conf, store),
+        HistoriqueMensuelSensor(entry, conf, store),
     ]
     async_add_entities(entities)
 
@@ -315,3 +317,37 @@ class CoutTotalAnneeSensor(LuminusSensorBase):
         fixe = calc.cout_fixe_journalier(self.hass)
         aujourdhui = variable + fixe
         return round(self._store.accumulateur_annee + aujourdhui, 2)
+
+
+class HistoriqueMensuelSensor(LuminusSensorBase):
+    """Historique mensuel (mois archivés automatiquement à la clôture +
+    mois saisis/corrigés via le service definir_mois_historique). L'état
+    est le nombre de mois enregistrés ; le détail est dans l'attribut
+    "mois", exploitable depuis une carte Markdown - voir le README pour
+    un exemple de carte."""
+
+    _attr_icon = "mdi:calendar-text"
+    _attr_native_unit_of_measurement = "mois"
+
+    def __init__(self, entry: ConfigEntry, conf: dict, store: LuminusStore) -> None:
+        super().__init__(entry, conf, "historique_mensuel", "Historique mensuel")
+        self._store = store
+
+    @property
+    def native_value(self) -> int:
+        return len(self._store.historique_mensuel)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        mois_tries = sorted(self._store.historique_mensuel.items())
+        liste = []
+        for cle, enregistrement in mois_tries:
+            annee, mois_num = (int(p) for p in cle.split("-"))
+            liste.append(
+                {
+                    "mois": cle,
+                    "mois_label": f"{MOIS_FR[mois_num - 1]} {annee}",
+                    **enregistrement,
+                }
+            )
+        return {"mois": liste}
