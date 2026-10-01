@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
+from homeassistant.util import dt as dt_util
 from datetime import timedelta
 
 from . import calculations as calc
@@ -350,4 +351,48 @@ class HistoriqueMensuelSensor(LuminusSensorBase):
                     **enregistrement,
                 }
             )
-        return {"mois": liste}
+        return {"mois": liste, "total_annee": self._total_annee()}
+
+    def _total_annee(self) -> dict:
+        """Agrège les mois archivés de l'année en cours + la progression
+        du mois en cours (pas encore archivé) - toujours à jour, pas
+        seulement jusqu'au dernier mois clôturé."""
+        annee_en_cours = str(dt_util.now().year)
+        mois_en_cours = dt_util.now().strftime("%Y-%m")
+
+        conso = 0.0
+        production = 0.0
+        for cle, enregistrement in self._store.historique_mensuel.items():
+            # Le mois en cours est exclu de la boucle : sa contribution
+            # vient du cumul live ci-dessous, pas de l'archive (même si
+            # une saisie manuelle existe déjà pour ce mois, pour éviter
+            # de la compter deux fois).
+            if cle.startswith(annee_en_cours) and cle != mois_en_cours:
+                conso += enregistrement.get("consommation_kwh", 0.0)
+                production += enregistrement.get("production_kwh", 0.0)
+
+        # Mois en cours : jours déjà clôturés (store) + la journée en cours (live).
+        prelevement_jour = calc.prelevement_total(
+            self.hass, self._conf.get(CONF_DELIVERED_PEAK), self._conf.get(CONF_DELIVERED_OFFPEAK)
+        )
+        injection_jour = calc.injection_totale(
+            self.hass, self._conf.get(CONF_RETURNED_PEAK), self._conf.get(CONF_RETURNED_OFFPEAK)
+        )
+        conso += self._store.conso_mois_kwh + prelevement_jour
+        production += self._store.injection_mois_kwh + injection_jour
+
+        _cumule_apres, variable = calc.cout_variable(
+            self.hass, prelevement_jour, injection_jour, self._store.net_cumule_periode
+        )
+        cout_total_eur = round(
+            self._store.accumulateur_annee + variable + calc.cout_fixe_journalier(self.hass), 2
+        )
+        prix_moyen = round(cout_total_eur / conso, 4) if conso else 0.0
+
+        return {
+            "consommation_kwh": round(conso, 3),
+            "production_kwh": round(production, 3),
+            "solde_net_kwh": round(conso - production, 3),
+            "cout_total_eur": cout_total_eur,
+            "prix_moyen_kwh": prix_moyen,
+        }

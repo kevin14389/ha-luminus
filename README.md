@@ -72,7 +72,10 @@ L'intégration HACS archive automatiquement chaque mois terminé
 (`sensor.luminus_historique_mensuel`, attribut `mois` = liste détaillée)
 avec la consommation, la production, le coût total réel, le prix moyen
 par kWh et le solde net. Les mois à venir se remplissent tout seuls au
-fur et à mesure.
+fur et à mesure. L'attribut `total_annee` du même capteur donne le total
+cumulé de l'année en cours (mois archivés + progression du mois en
+cours), pour un total de tout sans avoir à additionner les mois
+toi-même.
 
 **Pour importer l'historique déjà disponible sur MyOres** (ex. depuis le
 01/01/2026, avant l'installation de l'intégration) : va dans **Outils de
@@ -95,6 +98,17 @@ Exemple de carte Lovelace (type Markdown) pour afficher l'historique :
 type: markdown
 title: Historique mensuel - Luminus
 content: >
+  {% set total = state_attr('sensor.luminus_historique_mensuel', 'total_annee') %}
+  ## {{ now().year }} - Total de l'année
+
+  **Consommation :** {{ total.consommation_kwh }} kWh
+  **Production :** {{ total.production_kwh }} kWh
+  **Prix :** {{ total.cout_total_eur }} €
+  **Coût kWh :** {{ total.prix_moyen_kwh }} €/kWh
+  **Solde NET :** {{ total.solde_net_kwh }} kWh
+
+  ===
+
   {% for m in state_attr('sensor.luminus_historique_mensuel', 'mois') | reverse %}
   ### {{ m.mois_label }}
   **Consommation :** {{ m.consommation_kwh }} kWh
@@ -107,6 +121,10 @@ content: >
   ---
   {% endfor %}
 ```
+
+Le total de l'année (tout en haut de la carte) s'actualise en continu : il
+additionne les mois déjà archivés **et** la progression du mois en cours,
+donc il reste à jour même avant la clôture du mois.
 
 **Limite connue** : pour un mois saisi manuellement, le coût est
 recalculé à partir des tarifs **actuels** (pas forcément ceux en
