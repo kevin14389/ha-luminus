@@ -1,0 +1,78 @@
+"""Constantes pour l'intégration Luminus Comfy Électricité.
+
+Valeurs par défaut validées contre un vrai décompte annuel Luminus
+(01.12.2024-30.11.2025) - voir le README du dépôt pour la méthode de
+calcul. Spécifique au contrat "Luminus Comfy Electricité", région
+Wallonie, réseau ELIA + ORES Luxembourg, régime prosumer sans
+compensation d'injection (confirmé par Luminus, pas de rachat de
+l'excédent avant 2030 minimum pour ce contrat).
+"""
+
+from __future__ import annotations
+
+DOMAIN = "luminus_comfy"
+
+# --- Clés de configuration (config_flow) : les 4 capteurs du compteur
+# communicant. "delivered" = prélevé du réseau, "returned" = injecté.
+CONF_DELIVERED_PEAK = "delivered_peak_entity"
+CONF_DELIVERED_OFFPEAK = "delivered_offpeak_entity"
+CONF_RETURNED_PEAK = "returned_peak_entity"
+CONF_RETURNED_OFFPEAK = "returned_offpeak_entity"
+
+# --- Clés des entités "number" (tarifs modifiables) ---
+NUM_PRIX_ENERGIE_TTC = "prix_energie_ttc"
+NUM_REDEVANCE_FIXE_ANNUELLE = "redevance_fixe_annuelle"
+NUM_COUT_ENERGIE_VERTE = "cout_energie_verte"
+NUM_ORES_COUT_RESEAU_VARIABLE = "ores_cout_reseau_variable"
+NUM_ORES_TERME_FIXE_GRD = "ores_terme_fixe_grd"
+NUM_TAXE_ACCISE_SPECIAL = "taxe_accise_special"
+NUM_TAXE_COTISATION_ENERGIE = "taxe_cotisation_energie"
+NUM_TAXE_REDEVANCE_RACCORDEMENT = "taxe_redevance_raccordement"
+NUM_TAUX_TVA = "taux_tva"
+NUM_REMISE_FIDELITE_12_MOIS = "remise_fidelite_12_mois"
+NUM_REMISE_FIDELITE_24_MOIS = "remise_fidelite_24_mois"
+NUM_PRIX_ENERGIE_TTC_PROCHAIN = "prix_energie_ttc_prochain"
+NUM_CORRECTION_MANUELLE = "correction_manuelle"
+
+# (clé, nom, unité, min, max, step, valeur par défaut)
+NUMBER_DEFINITIONS: list[tuple[str, str, str, float, float, float, float]] = [
+    (NUM_PRIX_ENERGIE_TTC, "Prix énergie fournie (TTC)", "c€/kWh", 0, 100, 0.01, 18.73),
+    (NUM_REDEVANCE_FIXE_ANNUELLE, "Redevance fixe annuelle (TTC)", "€/an", 0, 500, 0.01, 65.00),
+    (NUM_COUT_ENERGIE_VERTE, "Coûts énergie verte (HTVA)", "c€/kWh", 0, 10, 0.0001, 2.8281),
+    (NUM_ORES_COUT_RESEAU_VARIABLE, "ELIA + ORES - Coût réseau combiné (HTVA)", "c€/kWh", 0, 50, 0.01, 17.61),
+    (NUM_ORES_TERME_FIXE_GRD, "ORES - Terme fixe GRD (HTVA)", "€/an", 0, 100, 0.01, 13.06),
+    (NUM_TAXE_ACCISE_SPECIAL, "Taxe - Droit d'accise spécial (HTVA)", "c€/kWh", 0, 20, 0.0001, 4.7480),
+    (NUM_TAXE_COTISATION_ENERGIE, "Taxe - Cotisation sur l'énergie (HTVA)", "c€/kWh", 0, 5, 0.0001, 0.1927),
+    (NUM_TAXE_REDEVANCE_RACCORDEMENT, "Taxe - Redevance de raccordement (HTVA)", "c€/kWh", 0, 5, 0.0001, 0.0750),
+    (NUM_TAUX_TVA, "Taux de TVA électricité", "%", 0, 25, 0.5, 6),
+    (NUM_REMISE_FIDELITE_12_MOIS, "Remise fidélité après 12 mois", "%", 0, 50, 0.5, 5),
+    (NUM_REMISE_FIDELITE_24_MOIS, "Remise fidélité après 24 mois", "%", 0, 50, 0.5, 10),
+    (NUM_PRIX_ENERGIE_TTC_PROCHAIN, "Prochain prix énergie programmé (TTC)", "c€/kWh", 0, 100, 0.01, 0),
+    (NUM_CORRECTION_MANUELLE, "Correction manuelle à appliquer", "EUR", -1000, 1000, 0.01, 0),
+]
+
+# --- Switches (remplacent les input_boolean) ---
+SWITCH_REMISE_FIDELITE_ACTIVE = "remise_fidelite_active"
+SWITCH_CHANGEMENT_PRIX_PROGRAMME = "changement_prix_programme"
+
+# --- Datetimes (remplacent les input_datetime) ---
+DATETIME_DATE_DEBUT_CONTRAT = "date_debut_contrat"
+DATETIME_PRIX_ENERGIE_DATE_EFFET = "prix_energie_date_effet"
+
+# --- Button ---
+BUTTON_APPLIQUER_CORRECTION_MANUELLE = "appliquer_correction_manuelle"
+
+# --- Store (accumulateurs persistés, indépendants de la restauration
+# d'état des entités - voir store.py) ---
+STORE_VERSION = 1
+STORE_KEY_ACCUMULATEUR_MOIS = "accumulateur_mois"
+STORE_KEY_ACCUMULATEUR_ANNEE = "accumulateur_annee"
+STORE_KEY_NET_CUMULE_PERIODE = "net_cumule_periode"
+STORE_KEY_MOIS_COURANT = "mois_courant"  # "YYYY-MM" du dernier reset mensuel
+STORE_KEY_ANNEE_COURANTE = "annee_courante"  # "YYYY" du dernier reset annuel
+
+# Heure de clôture quotidienne (juste après minuit, lit les totaux exacts
+# du cycle qui vient de se terminer - voir __init__.py)
+DAILY_CLOSEOUT_HOUR = 0
+DAILY_CLOSEOUT_MINUTE = 0
+DAILY_CLOSEOUT_SECOND = 30

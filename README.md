@@ -11,12 +11,62 @@ Luxembourg (distribution)**, régime **prosumer** avec compteur communicant.
 > pour la méthode et les écarts trouvés.
 
 Toute la tarification (prix de l'énergie, coûts réseau ORES, taxes, TVA,
-remises de fidélité) est exposée sous forme d'aides (`input_number` /
-`input_boolean` / `input_datetime`) modifiables **depuis l'interface Home
-Assistant**, sans toucher au YAML — pratique pour les adaptations de prix en
-cours d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
+remises de fidélité) reste modifiable **depuis l'interface Home Assistant**,
+sans toucher au code — pratique pour les adaptations de prix en cours
+d'année (indexation Luminus, nouveaux tarifs ORES au 1er janvier, etc.).
 
-## Installation
+Deux façons de l'installer :
+
+- **Intégration HACS** (`custom_components/luminus_comfy/`) — recommandée,
+  installation/mise à jour en un clic, configuration guidée par formulaire.
+  Toute la logique de calcul est identique à la version YAML, les formules
+  ont juste été portées telles quelles.
+- **Package YAML** (`packages/`) — méthode historique, toujours
+  fonctionnelle, utile si tu préfères tout voir/modifier en texte.
+
+## Installation via HACS (recommandée)
+
+1. Dans HACS → les trois points en haut à droite → **Dépôts personnalisés**
+   → ajoute l'URL de ce repo (`https://github.com/kevin14389/ha-luminus`),
+   catégorie **Intégration**.
+2. Installe "Luminus Comfy Électricité" depuis HACS, puis redémarre Home
+   Assistant.
+3. **Paramètres → Appareils et services → Ajouter une intégration** →
+   cherche "Luminus Comfy Électricité".
+4. Sélectionne tes 4 capteurs de compteur communicant (prélèvement et
+   injection, heures pleines et creuses) dans le formulaire — tu peux les
+   changer plus tard via **Configurer** sur l'intégration, sans la
+   réinstaller.
+5. Toutes les entités sont créées automatiquement (voir le tableau de
+   correspondance ci-dessous) avec les valeurs par défaut déjà validées
+   contre un vrai décompte Luminus. Ajuste-les si ta situation diffère.
+
+### Si tu migres depuis le package YAML
+
+Les deux versions peuvent cohabiter sans conflit (noms d'entités
+différents), mais pour éviter les doublons de calcul, désactive le
+package YAML en renommant ou supprimant
+`packages/luminus_comfy_electricite.yaml` une fois l'intégration HACS
+configurée. Les entités `sensor.luminus_*` gardent exactement les mêmes
+noms (tes cartes Lovelace existantes continuent de fonctionner) ; seules
+les aides changent de préfixe :
+
+| Package YAML | Intégration HACS |
+|---|---|
+| `input_number.luminus_*` | `number.luminus_*` |
+| `input_boolean.luminus_*` | `switch.luminus_*` |
+| `input_datetime.luminus_*` | `date.luminus_*` |
+| `input_button.luminus_appliquer_correction_manuelle` | `button.luminus_appliquer_correction_manuelle` |
+| `sensor.luminus_*` | `sensor.luminus_*` (inchangé) |
+
+Côté stockage interne, l'intégration HACS garde les accumulateurs
+mensuel/annuel et le cumul de période dans un fichier dédié
+(`.storage/luminus_comfy_<id>`) plutôt que dans des `input_number` — plus
+robuste face au bug de reset rencontré avec la version YAML après une
+mise à jour Home Assistant (voir plus bas), sans garantie absolue que ça
+l'élimine complètement si la cause était plus profonde.
+
+## Installation manuelle (package YAML, méthode historique)
 
 1. Copie le dossier `packages/` de ce repo dans ton dossier de configuration
    Home Assistant (à côté de `configuration.yaml`).

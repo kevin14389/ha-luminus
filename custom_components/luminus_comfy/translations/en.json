@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Luminus Comfy Électricité",
+        "description": "Sélectionne les 4 capteurs de ton compteur communicant. Tous les tarifs restent modifiables ensuite depuis les entités créées par l'intégration.",
+        "data": {
+          "delivered_peak_entity": "Prélèvement - heures pleines/jour",
+          "delivered_offpeak_entity": "Prélèvement - heures creuses/nuit",
+          "returned_peak_entity": "Injection - heures pleines/jour",
+          "returned_offpeak_entity": "Injection - heures creuses/nuit"
+        }
+      }
+    },
+    "error": {
+      "duplicate_entities": "Les 4 capteurs doivent être différents les uns des autres."
+    },
+    "abort": {
+      "already_configured": "Déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Capteurs du compteur",
+        "data": {
+          "delivered_peak_entity": "Prélèvement - heures pleines/jour",
+          "delivered_offpeak_entity": "Prélèvement - heures creuses/nuit",
+          "returned_peak_entity": "Injection - heures pleines/jour",
+          "returned_offpeak_entity": "Injection - heures creuses/nuit"
+        }
+      }
+    },
+    "error": {
+      "duplicate_entities": "Les 4 capteurs doivent être différents les uns des autres."
+    }
+  }
+}

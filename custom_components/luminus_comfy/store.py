@@ -1,0 +1,122 @@
+"""Stockage persisté des accumulateurs.
+
+Utilise le mécanisme Store natif de Home Assistant (fichier JSON dédié
+dans .storage/), indépendant du cycle de restauration d'état des
+entités. Les input_number du package YAML précédent ont subi une perte
+de données à au moins 2 reprises après des mises à jour Home Assistant
+sans cause identifiée avec certitude - ce stockage dédié est un pari
+raisonnable pour éviter que ça se reproduise, mais rien ne garantit
+qu'il est totalement immunisé si la cause était plus profonde (ex. un
+problème sur le répertoire .storage lui-même).
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
+
+from .const import (
+    DOMAIN,
+    STORE_KEY_ACCUMULATEUR_ANNEE,
+    STORE_KEY_ACCUMULATEUR_MOIS,
+    STORE_KEY_ANNEE_COURANTE,
+    STORE_KEY_MOIS_COURANT,
+    STORE_KEY_NET_CUMULE_PERIODE,
+    STORE_VERSION,
+)
+
+_DEFAULTS = {
+    STORE_KEY_ACCUMULATEUR_MOIS: 0.0,
+    STORE_KEY_ACCUMULATEUR_ANNEE: 0.0,
+    STORE_KEY_NET_CUMULE_PERIODE: 0.0,
+    STORE_KEY_MOIS_COURANT: "",
+    STORE_KEY_ANNEE_COURANTE: "",
+}
+
+
+class LuminusStore:
+    """Accumulateurs persistés pour une entrée de config donnée."""
+
+    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+        self._store: Store = Store(hass, STORE_VERSION, f"{DOMAIN}_{entry_id}")
+        self._data: dict = dict(_DEFAULTS)
+
+    async def async_load(self) -> None:
+        stored = await self._store.async_load()
+        if stored:
+            self._data.update(stored)
+        today = date.today()
+        # Première utilisation, ou migration depuis le package YAML :
+        # initialise les repères de cycle sur le mois/l'année courants
+        # pour ne pas déclencher un reset immédiat au premier calcul.
+        if not self._data[STORE_KEY_MOIS_COURANT]:
+            self._data[STORE_KEY_MOIS_COURANT] = today.strftime("%Y-%m")
+        if not self._data[STORE_KEY_ANNEE_COURANTE]:
+            self._data[STORE_KEY_ANNEE_COURANTE] = today.strftime("%Y")
+
+    async def _async_save(self) -> None:
+        await self._store.async_save(self._data)
+
+    # --- Accumulateur mensuel ---
+    @property
+    def accumulateur_mois(self) -> float:
+        return self._data[STORE_KEY_ACCUMULATEUR_MOIS]
+
+    @property
+    def mois_courant(self) -> str:
+        return self._data[STORE_KEY_MOIS_COURANT]
+
+    async def async_ajouter_cout_mois(self, montant: float) -> None:
+        self._data[STORE_KEY_ACCUMULATEUR_MOIS] = round(
+            self._data[STORE_KEY_ACCUMULATEUR_MOIS] + montant, 2
+        )
+        await self._async_save()
+
+    async def async_reset_mois(self, nouveau_mois: str) -> None:
+        self._data[STORE_KEY_ACCUMULATEUR_MOIS] = 0.0
+        self._data[STORE_KEY_MOIS_COURANT] = nouveau_mois
+        await self._async_save()
+
+    async def async_set_accumulateur_mois(self, valeur: float) -> None:
+        """Pour correction manuelle ou restauration suite à un incident."""
+        self._data[STORE_KEY_ACCUMULATEUR_MOIS] = round(valeur, 2)
+        await self._async_save()
+
+    # --- Accumulateur annuel ---
+    @property
+    def accumulateur_annee(self) -> float:
+        return self._data[STORE_KEY_ACCUMULATEUR_ANNEE]
+
+    @property
+    def annee_courante(self) -> str:
+        return self._data[STORE_KEY_ANNEE_COURANTE]
+
+    async def async_ajouter_cout_annee(self, montant: float) -> None:
+        self._data[STORE_KEY_ACCUMULATEUR_ANNEE] = round(
+            self._data[STORE_KEY_ACCUMULATEUR_ANNEE] + montant, 2
+        )
+        await self._async_save()
+
+    async def async_reset_annee(self, nouvelle_annee: str) -> None:
+        self._data[STORE_KEY_ACCUMULATEUR_ANNEE] = 0.0
+        self._data[STORE_KEY_ANNEE_COURANTE] = nouvelle_annee
+        await self._async_save()
+
+    async def async_set_accumulateur_annee(self, valeur: float) -> None:
+        self._data[STORE_KEY_ACCUMULATEUR_ANNEE] = round(valeur, 2)
+        await self._async_save()
+
+    # --- Cumul net de la période tarifaire (peut être négatif) ---
+    @property
+    def net_cumule_periode(self) -> float:
+        return self._data[STORE_KEY_NET_CUMULE_PERIODE]
+
+    async def async_set_net_cumule_periode(self, valeur: float) -> None:
+        self._data[STORE_KEY_NET_CUMULE_PERIODE] = round(valeur, 3)
+        await self._async_save()
+
+    async def async_reset_net_cumule_periode(self) -> None:
+        self._data[STORE_KEY_NET_CUMULE_PERIODE] = 0.0
+        await self._async_save()

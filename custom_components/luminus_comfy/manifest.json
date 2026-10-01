@@ -1,0 +1,12 @@
+{
+  "domain": "luminus_comfy",
+  "name": "Luminus Comfy Électricité",
+  "version": "1.0.0",
+  "codeowners": ["@kevin14389"],
+  "config_flow": true,
+  "documentation": "https://github.com/kevin14389/ha-luminus",
+  "issue_tracker": "https://github.com/kevin14389/ha-luminus/issues",
+  "iot_class": "calculated",
+  "integration_type": "service",
+  "requirements": []
+}
