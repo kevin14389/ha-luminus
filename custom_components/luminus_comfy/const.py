@@ -33,6 +33,8 @@ NUM_REMISE_FIDELITE_12_MOIS = "remise_fidelite_12_mois"
 NUM_REMISE_FIDELITE_24_MOIS = "remise_fidelite_24_mois"
 NUM_PRIX_ENERGIE_TTC_PROCHAIN = "prix_energie_ttc_prochain"
 NUM_CORRECTION_MANUELLE = "correction_manuelle"
+NUM_CORRECTION_MOIS = "correction_manuelle_mois"
+NUM_CORRECTION_ANNEE = "correction_manuelle_annee"
 
 # (clé, nom, unité, min, max, step, valeur par défaut)
 NUMBER_DEFINITIONS: list[tuple[str, str, str, float, float, float, float]] = [
@@ -48,7 +50,9 @@ NUMBER_DEFINITIONS: list[tuple[str, str, str, float, float, float, float]] = [
     (NUM_REMISE_FIDELITE_12_MOIS, "Remise fidélité après 12 mois", "%", 0, 50, 0.5, 5),
     (NUM_REMISE_FIDELITE_24_MOIS, "Remise fidélité après 24 mois", "%", 0, 50, 0.5, 10),
     (NUM_PRIX_ENERGIE_TTC_PROCHAIN, "Prochain prix énergie programmé (TTC)", "c€/kWh", 0, 100, 0.01, 0),
-    (NUM_CORRECTION_MANUELLE, "Correction manuelle à appliquer", "EUR", -1000, 1000, 0.01, 0),
+    (NUM_CORRECTION_MANUELLE, "Correction manuelle à appliquer (mois + année)", "EUR", -10000, 10000, 0.01, 0),
+    (NUM_CORRECTION_MOIS, "Correction manuelle - mois seul", "EUR", -10000, 10000, 0.01, 0),
+    (NUM_CORRECTION_ANNEE, "Correction manuelle - année seule", "EUR", -10000, 10000, 0.01, 0),
 ]
 
 # --- Switches (remplacent les input_boolean) ---
@@ -61,6 +65,8 @@ DATETIME_PRIX_ENERGIE_DATE_EFFET = "prix_energie_date_effet"
 
 # --- Button ---
 BUTTON_APPLIQUER_CORRECTION_MANUELLE = "appliquer_correction_manuelle"
+BUTTON_APPLIQUER_CORRECTION_MOIS = "appliquer_correction_mois"
+BUTTON_APPLIQUER_CORRECTION_ANNEE = "appliquer_correction_annee"
 
 # --- Service de saisie/correction de l'historique mensuel ---
 SERVICE_DEFINIR_MOIS_HISTORIQUE = "definir_mois_historique"
