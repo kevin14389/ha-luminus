@@ -198,3 +198,4 @@ def resume_mois(
         "prix_reseau_ttc": prix_reseau_ttc_c,
         "cumule_periode_apres": round(cumule_apres, 3),
     }
+    return cumule_apres, resume
