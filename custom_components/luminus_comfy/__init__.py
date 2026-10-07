@@ -322,13 +322,26 @@ async def _async_verifier_accumulateurs(hass: HomeAssistant, entry: ConfigEntry)
     )
 
 
+def _mois_precedent(mois: str) -> str:
+    annee, mois_num = (int(p) for p in mois.split("-"))
+    if mois_num == 1:
+        return f"{annee - 1}-12"
+    return f"{annee}-{mois_num - 1:02d}"
+
+
 async def _async_definir_mois_historique(
     hass: HomeAssistant, entry: ConfigEntry, call: ServiceCall
 ) -> None:
     """Service definir_mois_historique : saisie/correction manuelle d'un
     mois (ex. import depuis MyOres). Calcule coût, prix moyen et solde
     net automatiquement à partir des tarifs actuellement configurés -
-    voir calculations.resume_mois."""
+    voir calculations.resume_mois.
+
+    Enchaîne le cumul de période avec le mois précédemment importé (son
+    "cumule_periode_apres" dans l'historique) pour que le plafonnement à
+    0 du net facturable se fasse sur l'ensemble de la période tarifaire,
+    pas mois par mois isolément - d'où l'obligation d'importer les mois
+    dans l'ordre chronologique, sous peine de fausser le cumul."""
     mois: str = call.data[ATTR_MOIS]
     if not _MOIS_RE.match(mois):
         raise ServiceValidationError(
@@ -344,13 +357,17 @@ async def _async_definir_mois_historique(
     annee, mois_num = (int(p) for p in mois.split("-"))
     jours_du_mois = calendar.monthrange(annee, mois_num)[1]
 
-    resume = calc.resume_mois(
+    precedent = store.historique_mois(_mois_precedent(mois))
+    net_cumule_avant = precedent.get("cumule_periode_apres", 0.0) if precedent else 0.0
+
+    cumule_apres, resume = calc.resume_mois(
         consommation_kwh,
         production_kwh,
         calc.prix_energie_taxes_ttc(hass),
         calc.prix_reseau_ttc(hass),
         calc.cout_fixe_journalier(hass),
         jours_du_mois,
+        net_cumule_avant,
     )
     resume["source"] = "manuel"
 

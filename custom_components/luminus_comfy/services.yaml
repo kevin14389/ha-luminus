@@ -5,6 +5,9 @@ definir_mois_historique:
     donné. Le coût total, le prix moyen par kWh et le solde net sont
     recalculés automatiquement à partir des tarifs actuellement
     configurés. Utile pour importer l'historique depuis MyOres.
+    Importe toujours les mois dans l'ordre chronologique (janvier,
+    février, ...) : chaque mois reprend le cumul de compensation du
+    mois précédent, importer dans le désordre fausse le calcul.
   fields:
     mois:
       name: Mois

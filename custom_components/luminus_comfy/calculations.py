@@ -159,15 +159,28 @@ def resume_mois(
     prix_reseau_ttc_c: float,
     cout_fixe_journalier_eur: float,
     jours_du_mois: int,
-) -> dict:
+    net_cumule_avant: float = 0.0,
+) -> tuple[float, dict]:
     """Résumé d'un mois complet à partir de totaux kWh (pas d'un cumul
-    jour par jour) : utilisé pour l'archivage automatique ET pour la
-    saisie manuelle via le service definir_mois_historique. Traite le
-    mois comme sa propre "période" pour le plafonnement waterfall
-    (simplification : une saisie manuelle mensuelle via MyOres n'a pas
-    la granularité jour par jour pour faire un vrai cumul de période
-    tarifaire - voir le README)."""
-    net_facturable_kwh = max(consommation_kwh - production_kwh, 0)
+    jour par jour) : utilisé par le service definir_mois_historique pour
+    importer un historique (ex. MyOres).
+
+    Enchaîne avec le cumul de la période tarifaire (net_cumule_avant,
+    venant du mois précédemment importé - voir __init__.py) exactement
+    comme le fait le suivi quotidien en direct : un mois très négatif
+    (grosse injection) compense les mois précédents de la MÊME période
+    tarifaire au lieu d'être plafonné isolément à 0. Sans ça, une suite
+    de mois d'été très producteurs serait chacun compté à 0 € d'énergie
+    au lieu de se soustraire du cumul des mois d'hiver, ce qui gonflait
+    artificiellement le total (bug réel détecté sur un cas concret : un
+    import traité mois par mois donnait 3206€ au lieu de ~2862€ pour la
+    même période, parce que chaque mois d'été à net négatif perdait son
+    crédit au lieu de le reporter sur les mois précédents).
+
+    Retourne (cumule_apres, résumé) : cumule_apres doit être passé comme
+    net_cumule_avant du mois suivant pour que la chaîne reste correcte -
+    d'où l'obligation d'importer les mois dans l'ordre chronologique."""
+    cumule_apres, net_facturable_kwh = net_facturable(net_cumule_avant, consommation_kwh - production_kwh)
     cout_variable_eur = (net_facturable_kwh * prix_energie_taxes_ttc_c / 100) + (
         consommation_kwh * prix_reseau_ttc_c / 100
     )
@@ -175,7 +188,7 @@ def resume_mois(
     cout_total_eur = round(cout_variable_eur + cout_fixe_eur, 2)
     solde_net_kwh = round(consommation_kwh - production_kwh, 3)
     prix_moyen_kwh = round(cout_total_eur / consommation_kwh, 4) if consommation_kwh else 0.0
-    return {
+    resume = {
         "consommation_kwh": round(consommation_kwh, 3),
         "production_kwh": round(production_kwh, 3),
         "solde_net_kwh": solde_net_kwh,
@@ -183,4 +196,5 @@ def resume_mois(
         "prix_moyen_kwh": prix_moyen_kwh,
         "prix_energie_taxes_ttc": prix_energie_taxes_ttc_c,
         "prix_reseau_ttc": prix_reseau_ttc_c,
+        "cumule_periode_apres": round(cumule_apres, 3),
     }

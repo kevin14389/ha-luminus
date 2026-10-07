@@ -126,15 +126,26 @@ Le total de l'année (tout en haut de la carte) s'actualise en continu : il
 additionne les mois déjà archivés **et** la progression du mois en cours,
 donc il reste à jour même avant la clôture du mois.
 
+**Important : importe toujours les mois dans l'ordre chronologique**
+(janvier, puis février, puis mars, ...). Le plafonnement à 0 du net
+facturable (prosumer sans compensation d'injection) se fait sur le
+cumul de l'ensemble de la période tarifaire, pas mois par mois
+isolément : un mois très producteur (ex. été) doit pouvoir compenser
+les mois précédents de la même période au lieu d'être plafonné à 0 pour
+lui-même. Chaque mois importé reprend le cumul du mois précédent — si
+les mois sont importés dans le désordre ou avec un trou, ce cumul (et
+donc le coût calculé) sera faussé.
+
 **Limite connue** : pour un mois saisi manuellement, le coût est
 recalculé à partir des tarifs **actuels** (pas forcément ceux en
 vigueur ce mois-là si un changement de prix a eu lieu entre-temps) et
-en traitant le mois comme sa propre période de compensation (pas de
-cumul jour par jour faute de détail dans l'export MyOres) — une
-approximation raisonnable, mais potentiellement différente de quelques
-centimes du vrai décompte Luminus. Pour les mois archivés
-automatiquement par l'intégration, le coût est toujours exact (accumulé
-jour par jour avec le bon tarif à chaque fois).
+sans détail jour par jour (l'export MyOres ne donne que des totaux
+mensuels, donc si le tarif a changé en cours de mois, tout le mois est
+calculé avec un seul tarif) — une approximation raisonnable, mais
+potentiellement différente de quelques centimes du vrai décompte
+Luminus. Pour les mois archivés automatiquement par l'intégration, le
+coût est toujours exact (accumulé jour par jour avec le bon tarif à
+chaque fois).
 
 ## Installation manuelle (package YAML, méthode historique)
 
