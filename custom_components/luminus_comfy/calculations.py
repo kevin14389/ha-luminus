@@ -21,6 +21,8 @@ from .const import (
     NUM_REDEVANCE_FIXE_ANNUELLE,
     NUM_REMISE_FIDELITE_12_MOIS,
     NUM_REMISE_FIDELITE_24_MOIS,
+    NUM_REMISE_FIDELITE_DOMICILIATION,
+    NUM_RISTORNO_CREDIT_JOURNALIER,
     NUM_TAUX_TVA,
     NUM_TAXE_ACCISE_SPECIAL,
     NUM_TAXE_COTISATION_ENERGIE,
@@ -89,6 +91,7 @@ def prix_energie_taxes_ttc(hass: HomeAssistant) -> float:
     energie_ttc = get_number(hass, NUM_PRIX_ENERGIE_TTC)
     energie_ht = energie_ttc / (1 + tva / 100) if (1 + tva / 100) else 0.0
 
+    remise_domiciliation = 0.0
     if get_switch_on(hass, SWITCH_REMISE_FIDELITE_ACTIVE):
         debut = get_date(hass, DATETIME_DATE_DEBUT_CONTRAT)
         if debut is not None:
@@ -100,13 +103,18 @@ def prix_energie_taxes_ttc(hass: HomeAssistant) -> float:
                 energie_ht *= 1 - r24 / 100
             elif mois >= 12:
                 energie_ht *= 1 - r12 / 100
+        # Remise fixe par kWh net, distincte du pourcentage ci-dessus,
+        # conditionnée à la même domiciliation (0 par défaut : n'a
+        # d'effet que si explicitement configurée - voir le README pour
+        # le risque de double comptage avec la remise en %).
+        remise_domiciliation = get_number(hass, NUM_REMISE_FIDELITE_DOMICILIATION)
 
     energie_verte = get_number(hass, NUM_COUT_ENERGIE_VERTE)
     accise = get_number(hass, NUM_TAXE_ACCISE_SPECIAL)
     cotisation = get_number(hass, NUM_TAXE_COTISATION_ENERGIE)
     raccordement = get_number(hass, NUM_TAXE_REDEVANCE_RACCORDEMENT)
 
-    total_ht = energie_ht + energie_verte + accise + cotisation + raccordement
+    total_ht = energie_ht + energie_verte + accise + cotisation + raccordement - remise_domiciliation
     return round(total_ht * (1 + tva / 100), 4)
 
 
@@ -120,12 +128,15 @@ def prix_reseau_ttc(hass: HomeAssistant) -> float:
 
 def cout_fixe_journalier(hass: HomeAssistant) -> float:
     """EUR/jour : redevance Luminus (déjà TTC) + terme fixe GRD (HTVA->TTC),
-    divisés par 365."""
+    divisés par 365, moins le crédit ristorno journalier (TTC, 0 par
+    défaut - n'a d'effet que si explicitement configuré, voir le
+    README)."""
     tva = get_number(hass, NUM_TAUX_TVA)
     redevance_ttc = get_number(hass, NUM_REDEVANCE_FIXE_ANNUELLE)
     grd = get_number(hass, NUM_ORES_TERME_FIXE_GRD)
     grd_ttc = grd * (1 + tva / 100)
-    return round((redevance_ttc + grd_ttc) / 365, 4)
+    ristorno_ttc = get_number(hass, NUM_RISTORNO_CREDIT_JOURNALIER)
+    return round((redevance_ttc + grd_ttc) / 365 - ristorno_ttc, 4)
 
 
 def net_facturable(net_cumule_avant: float, delta_net_du_jour: float) -> tuple[float, float]:

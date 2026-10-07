@@ -236,6 +236,8 @@ chaque fois).
 | `input_number.remise_fidelite_12_mois` | Promo Luminus domiciliation | 5 % |
 | `input_number.remise_fidelite_24_mois` | Promo Luminus domiciliation | 10 % |
 | `input_boolean.luminus_remise_fidelite_active` | À activer si tu payes par domiciliation | Désactivé |
+| `number.luminus_remise_fidelite_domiciliation_kwh` | Remise fixe par kWh net, en plus (ou à la place, à vérifier) du % ci-dessus - active seulement si le switch ci-dessus est actif | 0 (inactif) |
+| `number.luminus_ristorno_credit_journalier` | Crédit "Ristorno" journalier (€ TTC/jour) pour production décentralisée ≤10kWe sur compteur digital - valeur spécifique au décompte, à vérifier chaque année | 0 (inactif) |
 | `input_datetime.luminus_date_debut_contrat` | Date de début de ton contrat Luminus | à ajuster |
 | `input_number.luminus_prix_energie_ttc_prochain` | Prochain prix énergie, à programmer à l'avance | 0 (inactif) |
 | `input_datetime.luminus_prix_energie_date_effet` | Date d'entrée en vigueur du prochain prix | à ajuster |
@@ -287,11 +289,24 @@ montant" du décompte —
 ```
 (Montant à payer pour ELIA + Montant à payer pour ORES Luxembourg
  − total des lignes "Terme Fixe")
- ÷ consommation nette totale (kWh, même base que les lignes Luminus/accise)
+ ÷ consommation BRUTE totale prélevée (kWh, même base que `prix_reseau_ttc`
+   dans calculations.py - le réseau est TOUJOURS appliqué au brut, jamais au net)
  × 100  →  c€/kWh
 ```
 
-Pour ce décompte : `(300,44 + 823,92 − 13,04) ÷ 6.311,33 × 100 = 17,61 c€/kWh`.
+⚠️ **Erreur corrigée (découverte en comparant à un import MyOres
+indépendant)** : la valeur 17,61 c€/kWh encore utilisée par défaut avait
+été calculée en divisant par la consommation **nette** (6.311,33 kWh)
+alors que le code multiplie ce taux par le prélèvement **brut** —
+incohérence entre la formule de calibration et son usage réel. Pour le
+même décompte, avec le prélèvement brut réel (10.937 kWh) : `1.111,32 ÷
+10.937 × 100 ≈ 10,16 c€/kWh`, bien plus proche du tarif ELIA+ORES publié
+(~13-14 c€/kWh HTVA selon la synthèse CWaPE) une fois qu'on tient compte
+du Ristorno. **Si tu utilises cette méthode de calibration par décompte
+réel, divise toujours par le prélèvement brut, pas par le net** — le
+nombre 17,61 stocké par défaut sur les installations existantes doit être
+corrigé manuellement (c'est une entité `number` éditable, pas besoin de
+mise à jour du code).
 
 **Limite connue** : comme le ratio prélèvement brut/net dépend de ta
 production solaire (donc de la saison), ce taux moyen sous-estime
@@ -300,6 +315,11 @@ le surestime un peu en été (forte autoconsommation) — mais il redonne le
 bon total sur une année complète, ce qui est cohérent avec l'objectif de ce
 système (suivi/estimation, pas facture officielle). Recalcule cette
 formule à chaque nouveau décompte annuel pour rester calé sur la réalité.
+Alternative plus précise si tu connais le tarif ELIA+ORES publié de
+l'année ET le crédit Ristorno réel : utilise directement le tarif publié
+dans `ores_cout_reseau_variable`, et renseigne `ristorno_credit_journalier`
+séparément (voir plus haut) plutôt que de tout mélanger dans un seul taux
+moyen.
 
 ## Compensation prélèvement / injection
 

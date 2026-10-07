@@ -32,6 +32,8 @@ NUM_TAUX_TVA = "taux_tva"
 NUM_REMISE_FIDELITE_12_MOIS = "remise_fidelite_12_mois"
 NUM_REMISE_FIDELITE_24_MOIS = "remise_fidelite_24_mois"
 NUM_PRIX_ENERGIE_TTC_PROCHAIN = "prix_energie_ttc_prochain"
+NUM_REMISE_FIDELITE_DOMICILIATION = "remise_fidelite_domiciliation_kwh"
+NUM_RISTORNO_CREDIT_JOURNALIER = "ristorno_credit_journalier"
 NUM_CORRECTION_MANUELLE = "correction_manuelle"
 NUM_CORRECTION_MOIS = "correction_manuelle_mois"
 NUM_CORRECTION_ANNEE = "correction_manuelle_annee"
@@ -50,6 +52,8 @@ NUMBER_DEFINITIONS: list[tuple[str, str, str, float, float, float, float]] = [
     (NUM_REMISE_FIDELITE_12_MOIS, "Remise fidélité après 12 mois", "%", 0, 50, 0.5, 5),
     (NUM_REMISE_FIDELITE_24_MOIS, "Remise fidélité après 24 mois", "%", 0, 50, 0.5, 10),
     (NUM_PRIX_ENERGIE_TTC_PROCHAIN, "Prochain prix énergie programmé (TTC)", "c€/kWh", 0, 100, 0.01, 0),
+    (NUM_REMISE_FIDELITE_DOMICILIATION, "Remise fidélité domiciliation (HTVA)", "c€/kWh", 0, 5, 0.0001, 0),
+    (NUM_RISTORNO_CREDIT_JOURNALIER, "Crédit ristorno journalier (TTC)", "EUR/jour", 0, 5, 0.0001, 0),
     (NUM_CORRECTION_MANUELLE, "Correction manuelle à appliquer (mois + année)", "EUR", -10000, 10000, 0.01, 0),
     (NUM_CORRECTION_MOIS, "Correction manuelle - mois seul", "EUR", -10000, 10000, 0.01, 0),
     (NUM_CORRECTION_ANNEE, "Correction manuelle - année seule", "EUR", -10000, 10000, 0.01, 0),

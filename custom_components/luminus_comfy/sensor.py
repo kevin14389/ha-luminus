@@ -362,6 +362,7 @@ class HistoriqueMensuelSensor(LuminusSensorBase):
 
         conso = 0.0
         production = 0.0
+        cout_archive = 0.0
         for cle, enregistrement in self._store.historique_mensuel.items():
             # Le mois en cours est exclu de la boucle : sa contribution
             # vient du cumul live ci-dessous, pas de l'archive (même si
@@ -370,8 +371,12 @@ class HistoriqueMensuelSensor(LuminusSensorBase):
             if cle.startswith(annee_en_cours) and cle != mois_en_cours:
                 conso += enregistrement.get("consommation_kwh", 0.0)
                 production += enregistrement.get("production_kwh", 0.0)
+                cout_archive += enregistrement.get("cout_total_eur", 0.0)
 
         # Mois en cours : jours déjà clôturés (store) + la journée en cours (live).
+        # Utilise accumulateur_mois (remis à zéro chaque mois), pas
+        # accumulateur_annee : celui-ci couvre toute l'année glissante et
+        # compterait les mois déjà archivés ci-dessus une seconde fois.
         prelevement_jour = calc.prelevement_total(
             self.hass, self._conf.get(CONF_DELIVERED_PEAK), self._conf.get(CONF_DELIVERED_OFFPEAK)
         )
@@ -385,7 +390,7 @@ class HistoriqueMensuelSensor(LuminusSensorBase):
             self.hass, prelevement_jour, injection_jour, self._store.net_cumule_periode
         )
         cout_total_eur = round(
-            self._store.accumulateur_annee + variable + calc.cout_fixe_journalier(self.hass), 2
+            cout_archive + self._store.accumulateur_mois + variable + calc.cout_fixe_journalier(self.hass), 2
         )
         prix_moyen = round(cout_total_eur / conso, 4) if conso else 0.0
 
