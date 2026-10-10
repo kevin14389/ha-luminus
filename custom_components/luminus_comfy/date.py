@@ -34,7 +34,7 @@ class LuminusDate(DateEntity, RestoreEntity):
 
     def __init__(self, entry: ConfigEntry, key: str, name: str, icon: str) -> None:
         self._attr_unique_id = f"{entry.entry_id}_date_{key}"
-        self._attr_suggested_object_id = f"luminus_{key}"
+        self.entity_id = f"date.luminus_{key}"
         self._attr_name = name
         self._attr_icon = icon
         self._attr_native_value: date_ | None = None

@@ -80,7 +80,7 @@ class LuminusCorrectionButton(ButtonEntity):
         self._number_entity_id = f"number.luminus_{number_key}"
         self._cible = cible
         self._attr_unique_id = f"{entry.entry_id}_button_{key}"
-        self._attr_suggested_object_id = f"luminus_{key}"
+        self.entity_id = f"button.luminus_{key}"
         self._attr_name = name
         self._attr_device_info = device_info_for_entry(entry)
 

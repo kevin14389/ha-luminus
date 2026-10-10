@@ -43,7 +43,7 @@ class LuminusNumber(RestoreNumber):
         default: float,
     ) -> None:
         self._attr_unique_id = f"{entry.entry_id}_number_{key}"
-        self._attr_suggested_object_id = f"luminus_{key}"
+        self.entity_id = f"number.luminus_{key}"
         self._attr_name = name
         self._attr_native_unit_of_measurement = unit
         self._attr_native_min_value = min_value

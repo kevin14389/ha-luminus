@@ -23,6 +23,7 @@ from .const import (
     STORE_KEY_ACCUMULATEUR_MOIS,
     STORE_KEY_ANNEE_COURANTE,
     STORE_KEY_CONSO_MOIS_KWH,
+    STORE_KEY_DERNIERE_CLOTURE,
     STORE_KEY_HISTORIQUE_MENSUEL,
     STORE_KEY_INJECTION_MOIS_KWH,
     STORE_KEY_MOIS_COURANT,
@@ -39,6 +40,7 @@ _DEFAULTS = {
     STORE_KEY_CONSO_MOIS_KWH: 0.0,
     STORE_KEY_INJECTION_MOIS_KWH: 0.0,
     STORE_KEY_HISTORIQUE_MENSUEL: {},
+    STORE_KEY_DERNIERE_CLOTURE: "",
 }
 
 
@@ -163,4 +165,14 @@ class LuminusStore:
 
     async def async_set_historique_mois(self, mois: str, enregistrement: dict) -> None:
         self._data[STORE_KEY_HISTORIQUE_MENSUEL][mois] = enregistrement
+        await self._async_save()
+
+    # --- Dernier jour clôturé avec succès (rattrapage au démarrage si
+    # l'intégration était arrêtée pile au passage de minuit) ---
+    @property
+    def derniere_cloture(self) -> str:
+        return self._data[STORE_KEY_DERNIERE_CLOTURE]
+
+    async def async_set_derniere_cloture(self, valeur: str) -> None:
+        self._data[STORE_KEY_DERNIERE_CLOTURE] = valeur
         await self._async_save()

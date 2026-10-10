@@ -89,6 +89,7 @@ STORE_KEY_ANNEE_COURANTE = "annee_courante"  # "YYYY" du dernier reset annuel
 STORE_KEY_CONSO_MOIS_KWH = "conso_mois_kwh"  # cumul kWh prélevés du mois en cours
 STORE_KEY_INJECTION_MOIS_KWH = "injection_mois_kwh"  # cumul kWh injectés du mois en cours
 STORE_KEY_HISTORIQUE_MENSUEL = "historique_mensuel"  # {"YYYY-MM": {...}}
+STORE_KEY_DERNIERE_CLOTURE = "derniere_cloture"  # "YYYY-MM-DD" du dernier jour clôturé avec succès
 
 # Heure de clôture quotidienne (juste après minuit, lit les totaux exacts
 # du cycle qui vient de se terminer - voir __init__.py)

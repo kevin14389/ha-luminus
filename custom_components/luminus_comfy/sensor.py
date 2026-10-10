@@ -98,7 +98,7 @@ class LuminusSensorBase(SensorEntity):
         self._entry = entry
         self._conf = conf
         self._attr_unique_id = f"{entry.entry_id}_sensor_{key}"
-        self._attr_suggested_object_id = f"luminus_{key}"
+        self.entity_id = f"sensor.luminus_{key}"
         self._attr_name = name
         self._attr_device_info = device_info_for_entry(entry)
 
@@ -295,6 +295,52 @@ class CoutTotalMoisSensor(LuminusSensorBase):
         return round(self._store.accumulateur_mois + aujourdhui, 2)
 
 
+def _calculer_total_annee(hass: HomeAssistant, conf: dict, store: LuminusStore) -> dict:
+    """Agrège les mois archivés de l'année en cours + la progression du
+    mois en cours (pas encore archivé) - toujours à jour, pas seulement
+    jusqu'au dernier mois clôturé. Calcul partagé entre
+    CoutTotalAnneeSensor et HistoriqueMensuelSensor pour qu'ils
+    affichent toujours le même total (ne jamais utiliser
+    store.accumulateur_annee ici : c'est un cumul brut depuis l'install,
+    jamais aligné sur les imports/corrections d'historique, et il
+    compterait les mois archivés une seconde fois)."""
+    annee_en_cours = str(dt_util.now().year)
+    mois_en_cours = dt_util.now().strftime("%Y-%m")
+
+    conso = 0.0
+    production = 0.0
+    cout_archive = 0.0
+    for cle, enregistrement in store.historique_mensuel.items():
+        if cle.startswith(annee_en_cours) and cle != mois_en_cours:
+            conso += enregistrement.get("consommation_kwh", 0.0)
+            production += enregistrement.get("production_kwh", 0.0)
+            cout_archive += enregistrement.get("cout_total_eur", 0.0)
+
+    prelevement_jour = calc.prelevement_total(
+        hass, conf.get(CONF_DELIVERED_PEAK), conf.get(CONF_DELIVERED_OFFPEAK)
+    )
+    injection_jour = calc.injection_totale(
+        hass, conf.get(CONF_RETURNED_PEAK), conf.get(CONF_RETURNED_OFFPEAK)
+    )
+    conso += store.conso_mois_kwh + prelevement_jour
+    production += store.injection_mois_kwh + injection_jour
+
+    _cumule_apres, variable = calc.cout_variable(
+        hass, prelevement_jour, injection_jour, store.net_cumule_periode
+    )
+    cout_total_eur = round(
+        cout_archive + store.accumulateur_mois + variable + calc.cout_fixe_journalier(hass), 2
+    )
+    prix_moyen = round(cout_total_eur / conso, 4) if conso else 0.0
+    return {
+        "consommation_kwh": round(conso, 3),
+        "production_kwh": round(production, 3),
+        "solde_net_kwh": round(conso - production, 3),
+        "cout_total_eur": cout_total_eur,
+        "prix_moyen_kwh": prix_moyen,
+    }
+
+
 class CoutTotalAnneeSensor(LuminusSensorBase):
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = "EUR"
@@ -306,18 +352,7 @@ class CoutTotalAnneeSensor(LuminusSensorBase):
 
     @property
     def native_value(self) -> float:
-        prelevement = calc.prelevement_total(
-            self.hass, self._conf.get(CONF_DELIVERED_PEAK), self._conf.get(CONF_DELIVERED_OFFPEAK)
-        )
-        injection = calc.injection_totale(
-            self.hass, self._conf.get(CONF_RETURNED_PEAK), self._conf.get(CONF_RETURNED_OFFPEAK)
-        )
-        _cumule_apres, variable = calc.cout_variable(
-            self.hass, prelevement, injection, self._store.net_cumule_periode
-        )
-        fixe = calc.cout_fixe_journalier(self.hass)
-        aujourdhui = variable + fixe
-        return round(self._store.accumulateur_annee + aujourdhui, 2)
+        return _calculer_total_annee(self.hass, self._conf, self._store)["cout_total_eur"]
 
 
 class HistoriqueMensuelSensor(LuminusSensorBase):
@@ -354,50 +389,4 @@ class HistoriqueMensuelSensor(LuminusSensorBase):
         return {"mois": liste, "total_annee": self._total_annee()}
 
     def _total_annee(self) -> dict:
-        """Agrège les mois archivés de l'année en cours + la progression
-        du mois en cours (pas encore archivé) - toujours à jour, pas
-        seulement jusqu'au dernier mois clôturé."""
-        annee_en_cours = str(dt_util.now().year)
-        mois_en_cours = dt_util.now().strftime("%Y-%m")
-
-        conso = 0.0
-        production = 0.0
-        cout_archive = 0.0
-        for cle, enregistrement in self._store.historique_mensuel.items():
-            # Le mois en cours est exclu de la boucle : sa contribution
-            # vient du cumul live ci-dessous, pas de l'archive (même si
-            # une saisie manuelle existe déjà pour ce mois, pour éviter
-            # de la compter deux fois).
-            if cle.startswith(annee_en_cours) and cle != mois_en_cours:
-                conso += enregistrement.get("consommation_kwh", 0.0)
-                production += enregistrement.get("production_kwh", 0.0)
-                cout_archive += enregistrement.get("cout_total_eur", 0.0)
-
-        # Mois en cours : jours déjà clôturés (store) + la journée en cours (live).
-        # Utilise accumulateur_mois (remis à zéro chaque mois), pas
-        # accumulateur_annee : celui-ci couvre toute l'année glissante et
-        # compterait les mois déjà archivés ci-dessus une seconde fois.
-        prelevement_jour = calc.prelevement_total(
-            self.hass, self._conf.get(CONF_DELIVERED_PEAK), self._conf.get(CONF_DELIVERED_OFFPEAK)
-        )
-        injection_jour = calc.injection_totale(
-            self.hass, self._conf.get(CONF_RETURNED_PEAK), self._conf.get(CONF_RETURNED_OFFPEAK)
-        )
-        conso += self._store.conso_mois_kwh + prelevement_jour
-        production += self._store.injection_mois_kwh + injection_jour
-
-        _cumule_apres, variable = calc.cout_variable(
-            self.hass, prelevement_jour, injection_jour, self._store.net_cumule_periode
-        )
-        cout_total_eur = round(
-            cout_archive + self._store.accumulateur_mois + variable + calc.cout_fixe_journalier(self.hass), 2
-        )
-        prix_moyen = round(cout_total_eur / conso, 4) if conso else 0.0
-
-        return {
-            "consommation_kwh": round(conso, 3),
-            "production_kwh": round(production, 3),
-            "solde_net_kwh": round(conso - production, 3),
-            "cout_total_eur": cout_total_eur,
-            "prix_moyen_kwh": prix_moyen,
-        }
+        return _calculer_total_annee(self.hass, self._conf, self._store)

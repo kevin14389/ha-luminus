@@ -470,6 +470,39 @@ entities:
   réforme des accises 2025 a changé ce taux en cours d'année, en dehors du
   cycle habituel de janvier).
 
+## Notes de version (bugs corrigés après usage réel)
+
+- **1.3.0 - entity_id trop longs.** Les versions antérieures tentaient de
+  fixer les entity_id courts (`number.luminus_<clé>`, etc.) via
+  `_attr_suggested_object_id`, qui n'a **aucun effet réel** sur l'entity_id
+  généré par Home Assistant (`suggested_object_id` est une propriété
+  calculée à partir du nom, pas un attribut qu'on peut surcharger ainsi).
+  Résultat : les entités étaient créées avec des entity_id longs
+  (`number.luminus_comfy_electricite_...`), que le code ne retrouvait pas
+  (ex. le suivi du changement de prix programmé, ou n'importe quel
+  `get_number`/`get_switch_on`/`get_date`). Corrigé en fixant directement
+  `self.entity_id` à la création. **Si tu as installé une version
+  antérieure**, tes entités existantes ont déjà leur entity_id long figé
+  dans le registre (HA ne les renomme jamais tout seul) : renomme-les à la
+  main (Paramètres → Appareils et services → Entités) vers le format
+  `<plateforme>.luminus_<clé>` listé dans ce README, ou supprime/recrée
+  l'intégration. Une intégration fraîchement installée avec 1.3.0+ n'a pas
+  ce problème.
+- **1.3.0 - `sensor.luminus_cout_total_annee` désynchronisé de
+  l'historique.** Ce capteur et l'attribut `total_annee` de
+  `sensor.luminus_historique_mensuel` utilisent maintenant exactement le
+  même calcul (dérivé de l'historique mensuel, pas de l'accumulateur brut
+  depuis l'installation).
+- **1.3.0 - rattrapage d'une clôture quotidienne manquée.** Si Home
+  Assistant était éteint (ou l'intégration en cours de rechargement) pile
+  au passage de minuit, ce jour-là n'était jamais crédité aux
+  accumulateurs - perdu définitivement, sans message d'erreur. Un
+  rattrapage automatique au démarrage détecte ce cas et relance la
+  clôture pour le jour manqué le plus récent (un seul jour rattrapable :
+  les capteurs sources ne gardent qu'un cycle précédent en mémoire). Un
+  trou déjà survenu **avant** cette version doit être corrigé à la main
+  via les boutons de correction manuelle.
+
 Dans tous les cas, il suffit de mettre à jour les `input_number`
 correspondants depuis l'interface Home Assistant — aucune modification de
 YAML n'est nécessaire.

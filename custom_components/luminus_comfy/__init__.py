@@ -98,11 +98,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Vérifications de rattrapage au démarrage/ajout de l'intégration :
-    # un changement de prix qui aurait dû s'appliquer pendant que HA
-    # était éteint, et un contrôle de cohérence des accumulateurs (voir
-    # le README : un incident après mise à jour HA les a déjà remis à 0
-    # sans prévenir à 2 reprises).
+    # une clôture quotidienne manquée (HA éteint/en redémarrage pile au
+    # passage de minuit - l'intégration ne peut rattraper que le DERNIER
+    # jour manqué, puisque "last_period" ne garde qu'un seul cycle
+    # précédent), un changement de prix qui aurait dû s'appliquer pendant
+    # que HA était éteint, et un contrôle de cohérence des accumulateurs
+    # (voir le README : un incident après mise à jour HA les a déjà remis
+    # à 0 sans prévenir à 2 reprises).
     async def _startup(_event=None) -> None:
+        await _async_rattraper_cloture_manquante(hass, entry)
         await _async_check_prix_programme(hass, entry)
         await _async_verifier_accumulateurs(hass, entry)
 
@@ -167,6 +171,31 @@ async def _async_notify(hass: HomeAssistant, title: str, message: str, notificat
     )
 
 
+async def _async_rattraper_cloture_manquante(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Si HA était éteint (ou l'intégration en cours de rechargement)
+    pile au passage de minuit, le déclencheur horaire de
+    _async_daily_closeout ne se déclenche pas et ce jour-là n'est jamais
+    crédité aux accumulateurs - sans rattrapage, il est perdu
+    définitivement. Détecte ce cas au démarrage et relance la clôture
+    pour le jour manqué. Ne peut rattraper qu'un seul jour manqué (le
+    plus récent) : "last_period" sur les capteurs sources ne conserve
+    qu'un seul cycle précédent, pas un historique complet."""
+    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
+    if not store.derniere_cloture:
+        # Première utilisation : rien à rattraper, juste pas encore clôturé.
+        return
+    hier = (dt_util.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    if store.derniere_cloture == hier:
+        return
+    _LOGGER.warning(
+        "Luminus Comfy : clôture manquante détectée au démarrage (dernière "
+        "clôture %s, hier était %s) - rattrapage du jour le plus récent.",
+        store.derniere_cloture,
+        hier,
+    )
+    await _async_daily_closeout(hass, entry)
+
+
 async def _async_daily_closeout(hass: HomeAssistant, entry: ConfigEntry) -> None:
     conf = {**entry.data, **entry.options}
     store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
@@ -194,6 +223,9 @@ async def _async_daily_closeout(hass: HomeAssistant, entry: ConfigEntry) -> None
     await store.async_ajouter_kwh_mois(prelevement_hier, injection_hier)
     await store.async_ajouter_cout_mois(cout_total_hier)
     await store.async_ajouter_cout_annee(cout_total_hier)
+    await store.async_set_derniere_cloture(
+        (dt_util.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    )
 
     today = dt_util.now().date()
     mois_str = today.strftime("%Y-%m")
