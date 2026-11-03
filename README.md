@@ -472,6 +472,28 @@ entities:
 
 ## Notes de version (bugs corrigés après usage réel)
 
+- **1.3.1 - clôture quotidienne qui ne tournait jamais.** Les callbacks
+  passés à `async_track_time_change`, `async_track_time_interval` et
+  `async_track_state_change_event` étaient des `lambda` simples
+  appelant `hass.async_create_task(...)`. Home Assistant ne sait pas
+  qu'un `lambda` non-`async` est sûr à exécuter dans la boucle
+  d'événements : il l'exécute dans l'executor (un thread), où
+  `hass.async_create_task` n'est pas autorisé - HA le signale dans le
+  journal ("calls hass.async_create_task from a thread other than the
+  event loop") mais la tâche plantée silencieusement. Résultat :
+  `_async_daily_closeout` ne s'exécutait jamais, `derniere_cloture`
+  restait vide, le mois ne changeait jamais tout seul, et le
+  rattrapage au démarrage (1.3.0) ne se déclenchait pas non plus
+  puisqu'un `derniere_cloture` vide était interprété comme "première
+  utilisation, rien à rattraper". Corrigé en passant directement des
+  fonctions `async def` aux trois `async_track_*` (HA les détecte et
+  les planifie lui-même, en toute sécurité) et en détectant aussi le
+  cas "jamais clôturé malgré un mois déjà périmé" dans le rattrapage.
+  **Si tu étais sur 1.3.0 avec ce blocage**, le rattrapage au démarrage
+  ne récupère qu'un seul jour : importe manuellement les jours/mois
+  perdus avant de mettre à jour, pour qu'ils ne soient pas écrasés par
+  un archivage automatique avec des données incomplètes (une saisie
+  manuelle n'est jamais écrasée).
 - **1.3.0 - entity_id trop longs.** Les versions antérieures tentaient de
   fixer les entity_id courts (`number.luminus_<clé>`, etc.) via
   `_attr_suggested_object_id`, qui n'a **aucun effet réel** sur l'entity_id

@@ -66,10 +66,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    async def _on_daily_closeout(_now) -> None:
+        await _async_daily_closeout(hass, entry)
+
+    async def _on_check_prix_programme(_now_or_event) -> None:
+        await _async_check_prix_programme(hass, entry)
+
     entry.async_on_unload(
         event_helper.async_track_time_change(
             hass,
-            lambda _now: hass.async_create_task(_async_daily_closeout(hass, entry)),
+            _on_daily_closeout,
             hour=DAILY_CLOSEOUT_HOUR,
             minute=DAILY_CLOSEOUT_MINUTE,
             second=DAILY_CLOSEOUT_SECOND,
@@ -79,7 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(
         event_helper.async_track_time_interval(
             hass,
-            lambda _now: hass.async_create_task(_async_check_prix_programme(hass, entry)),
+            _on_check_prix_programme,
             timedelta(hours=1),
         )
     )
@@ -93,7 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         event_helper.async_track_state_change_event(
             hass,
             list(tracked_prix_programme),
-            lambda _event: hass.async_create_task(_async_check_prix_programme(hass, entry)),
+            _on_check_prix_programme,
         )
     )
 
@@ -181,11 +187,21 @@ async def _async_rattraper_cloture_manquante(hass: HomeAssistant, entry: ConfigE
     plus récent) : "last_period" sur les capteurs sources ne conserve
     qu'un seul cycle précédent, pas un historique complet."""
     store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
+    today = dt_util.now().date()
+    hier = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    mois_str = today.strftime("%Y-%m")
+
     if not store.derniere_cloture:
-        # Première utilisation : rien à rattraper, juste pas encore clôturé.
-        return
-    hier = (dt_util.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    if store.derniere_cloture == hier:
+        # derniere_cloture vide : soit vraie première utilisation (rien à
+        # rattraper), soit la clôture n'a jamais pu tourner malgré un
+        # usage réel (ex. bug des callbacks non-coroutines corrigé en
+        # 1.3.1 - le champ n'a alors jamais été écrit). On distingue les
+        # deux cas via mois_courant : s'il est resté bloqué sur un mois
+        # déjà passé, la clôture est bien bloquée depuis un moment, pas
+        # juste jamais encore lancée.
+        if not store.mois_courant or store.mois_courant == mois_str:
+            return
+    elif store.derniere_cloture == hier:
         return
     _LOGGER.warning(
         "Luminus Comfy : clôture manquante détectée au démarrage (dernière "
