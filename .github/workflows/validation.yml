@@ -25,8 +25,8 @@ jobs:
             python: "3.14"
             banc: "0.13.375"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - name: Installer le banc d'essai Home Assistant
@@ -38,7 +38,7 @@ jobs:
     name: Hassfest (règles Home Assistant)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: home-assistant/actions/hassfest@master
 
   hacs:
@@ -50,4 +50,6 @@ jobs:
           category: integration
           # brands : pas d'icône dans home-assistant/brands.
           # description, topics : réglages du dépôt GitHub, pas du code.
-          ignore: brands description topics
+          # license : le dépôt n'a pas de fichier LICENSE (choix du
+          # propriétaire) ; retirer ce mot le jour où il y en a un.
+          ignore: brands description topics license
