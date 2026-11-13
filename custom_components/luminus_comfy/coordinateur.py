@@ -22,7 +22,7 @@ from __future__ import annotations
 import calendar
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -93,6 +93,7 @@ class LuminusCoordinateur:
         # Entités number/switch/date par clé, pour republier leur état
         # quand le coordinateur modifie leur valeur.
         self.entites: dict[str, Entity] = {}
+        self._releve_le: dict[str, datetime] = {}
         self._initialisation = False
         self._stockage_perdu = False
 
@@ -168,6 +169,12 @@ class LuminusCoordinateur:
         valeur = _flottant(state.state)
         if valeur is None:
             return False
+        # Selon la version de Home Assistant, un changement d'état est
+        # notifié avec un tour de boucle de retard : il peut arriver
+        # après que la clôture a déjà lu un état plus récent.
+        if state.last_updated < self._releve_le.get(entity_id, state.last_updated):
+            return False
+        self._releve_le[entity_id] = state.last_updated
         reset = state.attributes.get("last_reset")
         reset = None if reset is None else str(reset)
 

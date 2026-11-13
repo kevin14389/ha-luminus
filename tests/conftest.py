@@ -57,12 +57,20 @@ def heure_locale(texte: str) -> datetime:
     return datetime.fromisoformat(texte).replace(tzinfo=dt_util.get_time_zone(FUSEAU))
 
 
+async def laisser_tourner(hass: HomeAssistant) -> None:
+    """Jusqu'à Home Assistant 2026.x, un changement d'état n'est notifié
+    qu'au tour de boucle suivant : il en faut plusieurs pour traverser
+    une chaîne index -> utility_meter -> intégration."""
+    for _ in range(3):
+        await hass.async_block_till_done()
+
+
 async def aller_a(hass: HomeAssistant, freezer, texte: str) -> None:
     """Avance l'horloge et laisse tourner ce qui était programmé."""
     moment = heure_locale(texte)
     freezer.move_to(moment)
     async_fire_time_changed(hass, moment)
-    await hass.async_block_till_done()
+    await laisser_tourner(hass)
 
 
 async def installer(hass: HomeAssistant, entry: MockConfigEntry) -> None:
@@ -81,7 +89,7 @@ def nombre(hass: HomeAssistant, entity_id: str) -> float:
 async def regler(hass: HomeAssistant, entity_id: str, valeur, **attributs) -> None:
     """Change un capteur source et laisse l'intégration le relever."""
     regler_source(hass, entity_id, valeur, **attributs)
-    await hass.async_block_till_done()
+    await laisser_tourner(hass)
 
 
 async def demarrer(hass: HomeAssistant, entry: MockConfigEntry, freezer, quand: str) -> None:

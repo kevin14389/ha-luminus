@@ -165,3 +165,26 @@ async def test_nouveau_cycle_pendant_un_arret(hass: HomeAssistant, entry, freeze
     await installer(hass, entry)
 
     assert nombre(hass, CONSO) == 8.6
+
+
+async def test_etat_plus_ancien_que_le_dernier_releve_ignore(
+    hass: HomeAssistant, entry, freezer
+) -> None:
+    """Notification en retard d'un état déjà dépassé (la clôture a lu un
+    état plus récent entre-temps) : elle ne doit rien ajouter."""
+    from datetime import timedelta
+
+    from homeassistant.core import State
+    from homeassistant.util import dt as dt_util
+
+    await demarrer(hass, entry, freezer, MATIN)
+    coordinateur = entry.runtime_data
+    maintenant = dt_util.utcnow()
+    recent = State(PRELEVEMENT_JOUR, "7", last_updated=maintenant + timedelta(seconds=2))
+    ancien = State(PRELEVEMENT_JOUR, "6", last_updated=maintenant + timedelta(seconds=1))
+
+    coordinateur._async_relever(PRELEVEMENT_JOUR, recent)
+    coordinateur._async_relever(PRELEVEMENT_JOUR, ancien)
+    coordinateur._async_relever(PRELEVEMENT_JOUR, recent)
+
+    assert coordinateur.etat.prelevement_en_cours == 7

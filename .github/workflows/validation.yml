@@ -1,0 +1,53 @@
+name: Validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (Home Assistant ${{ matrix.ha }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # banc = version de pytest-homeassistant-custom-component, qui
+          # fixe la version de Home Assistant installée.
+          - ha: "2026.2.3"
+            python: "3.13"
+            banc: "0.13.316"
+          - ha: "2026.10.4"
+            python: "3.14"
+            banc: "0.13.375"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Installer le banc d'essai Home Assistant
+        run: pip install pytest-homeassistant-custom-component==${{ matrix.banc }}
+      - name: Lancer les tests
+        run: pytest
+
+  hassfest:
+    name: Hassfest (règles Home Assistant)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: Validation HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # brands : pas d'icône dans home-assistant/brands.
+          # description, topics : réglages du dépôt GitHub, pas du code.
+          ignore: brands description topics

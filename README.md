@@ -34,9 +34,10 @@ Deux façons de l'installer :
 3. **Paramètres → Appareils et services → Ajouter une intégration** →
    cherche "Luminus Comfy Électricité".
 4. Sélectionne tes 4 capteurs de compteur communicant (prélèvement et
-   injection, heures pleines et creuses) dans le formulaire — tu peux les
-   changer plus tard via **Configurer** sur l'intégration, sans la
-   réinstaller.
+   injection, heures pleines et creuses, en kWh) dans le formulaire — tu
+   peux les changer plus tard via **Configurer** sur l'intégration, sans
+   la réinstaller. Des compteurs journaliers (`utility_meter`) comme des
+   index qui ne reviennent jamais à zéro conviennent.
 5. Toutes les entités sont créées automatiquement (voir le tableau de
    correspondance ci-dessous) avec les valeurs par défaut déjà validées
    contre un vrai décompte Luminus. Ajuste-les si ta situation diffère.
@@ -146,6 +147,62 @@ potentiellement différente de quelques centimes du vrai décompte
 Luminus. Pour les mois archivés automatiquement par l'intégration, le
 coût est toujours exact (accumulé jour par jour avec le bon tarif à
 chaque fois).
+
+## Fonctionnement de l'intégration HACS (depuis la version 2.0.0)
+
+**Comptage de l'énergie.** L'intégration relève chaque changement de
+valeur des 4 capteurs sources et ajoute la différence à ses propres
+compteurs du jour (`sensor.luminus_conso_jour`,
+`sensor.luminus_injection_jour`). Juste après minuit (00:00:30), la
+clôture verse ces compteurs dans le mois et les remet à zéro. Chaque kWh
+est compté exactement une fois :
+
+- Home Assistant arrêté à minuit : la journée est clôturée au
+  redémarrage, sans rien perdre ni compter deux fois (le coût fixe est
+  compté pour chaque jour écoulé) ;
+- capteur source momentanément indisponible : ce qu'il a mesuré entre-temps
+  est repris à son retour ;
+- clôture lancée deux fois (redémarrage pile à minuit) : sans effet.
+
+**Tarifs.** Les calculs lisent directement la valeur des entités
+`number` / `switch` / `date` de l'intégration, pas leur entity_id : les
+renommer ne casse rien.
+
+**Cumul net de la période tarifaire.**
+`sensor.luminus_net_cumule_periode` affiche le solde prélèvement −
+injection (kWh) depuis le dernier changement de prix, jours clôturés
+uniquement. C'est lui qui détermine quelle part de l'injection compense
+l'énergie prélevée (voir "Compensation prélèvement / injection"). Si le
+suivi quotidien n'a pas tourné pendant un moment, recale-le avec le
+service **"Définir le cumul net de la période tarifaire"**
+(`luminus_comfy.definir_cumul_periode`, champ `cumul_kwh`).
+
+**Corrections manuelles.** Saisis un montant (positif ou négatif) dans
+l'entité `number`, puis appuie sur le bouton correspondant ; le montant
+est remis à 0 après application.
+
+| Bouton | Montant | Effet |
+|---|---|---|
+| `button.luminus_appliquer_correction_manuelle` | `number.luminus_correction_manuelle` | mois **et** année |
+| `button.luminus_appliquer_correction_mois` | `number.luminus_correction_manuelle_mois` | mois seul, l'année ne bouge pas |
+| `button.luminus_appliquer_correction_annee` | `number.luminus_correction_manuelle_annee` | année seule, le mois ne bouge pas |
+
+**Perte du fichier de données.** Si le fichier
+`.storage/luminus_comfy_<id>` disparaît alors que l'intégration est
+installée depuis plusieurs jours, une notification le signale au
+démarrage au lieu de laisser les totaux repartir de zéro en silence.
+
+**Tests.** Le dossier `tests/` exécute l'intégration dans le banc d'essai
+officiel de Home Assistant (installation, comptage, passages de minuit
+avec de vrais `utility_meter`, redémarrages, changement de mois, prix
+programmé, corrections, import d'historique). Ils tournent
+automatiquement sur GitHub à chaque modification, sur Home Assistant
+2026.2 et 2026.10, avec les contrôles `hassfest` et HACS. En local :
+
+```bash
+pip install -r requirements_test.txt   # Python 3.13
+pytest
+```
 
 ## Installation manuelle (package YAML, méthode historique)
 
@@ -472,6 +529,33 @@ entities:
 
 ## Notes de version (bugs corrigés après usage réel)
 
+- **2.0.0 - réécriture du cœur, avec tests.** Les trois bugs trouvés en
+  production (résumé de mois jamais renvoyé, entity_id trop longs,
+  clôture de minuit qui ne tournait pas) avaient la même cause : le code
+  n'avait jamais été exécuté dans un vrai Home Assistant avant
+  publication. Il l'est maintenant à chaque modification (voir "Tests"
+  plus haut). Corrigé au passage :
+  - le rattrapage de la 1.3.x pouvait compter une journée **deux fois**
+    quand Home Assistant était arrêté à minuit (les `utility_meter` ne se
+    remettent pas à zéro pendant l'arrêt, leur `last_period` était donc
+    celui d'un jour déjà compté) ; et une clôture lancée deux fois
+    recomptait la journée. Le comptage par relevés successifs supprime
+    les deux cas ;
+  - un capteur source indisponible à 00:00:30 faisait perdre la journée ;
+  - le bouton "correction année seule" n'avait plus aucun effet depuis
+    la 1.3.0, et "mois seul" modifiait aussi l'année ;
+  - changer les capteurs sources via **Configurer** n'était pris en
+    compte qu'au redémarrage ;
+  - l'ancienneté du contrat (remise fidélité) et le mois en cours
+    utilisaient la date système au lieu du fuseau de Home Assistant ;
+  - un prix programmé pouvait s'appliquer avant la clôture de la veille ;
+  - la liste complète des mois était réécrite en base de données à
+    chaque kWh (attributs désormais exclus de l'enregistreur).
+
+  Mise à jour : rien à faire, les données existantes sont reprises
+  telles quelles. Nouveau : `sensor.luminus_net_cumule_periode` et le
+  service `definir_cumul_periode`. Version minimale de Home Assistant :
+  2026.2.
 - **1.3.1 - clôture quotidienne qui ne tournait jamais.** Les callbacks
   passés à `async_track_time_change`, `async_track_time_interval` et
   `async_track_state_change_event` étaient des `lambda` simples
@@ -523,7 +607,7 @@ entities:
   clôture pour le jour manqué le plus récent (un seul jour rattrapable :
   les capteurs sources ne gardent qu'un cycle précédent en mémoire). Un
   trou déjà survenu **avant** cette version doit être corrigé à la main
-  via les boutons de correction manuelle.
+  via les boutons de correction manuelle. (Mécanisme remplacé en 2.0.0.)
 
 Dans tous les cas, il suffit de mettre à jour les `input_number`
 correspondants depuis l'interface Home Assistant — aucune modification de
