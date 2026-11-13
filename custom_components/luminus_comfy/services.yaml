@@ -40,3 +40,25 @@ definir_mois_historique:
           step: 0.1
           mode: box
           unit_of_measurement: kWh
+
+definir_cumul_periode:
+  name: Définir le cumul net de la période tarifaire
+  description: >-
+    Recale le solde net (prélèvement − injection, en kWh) accumulé depuis
+    le dernier changement de prix, jours clôturés uniquement - visible
+    dans sensor.luminus_net_cumule_periode. À utiliser après une période
+    où le suivi quotidien n'a pas fonctionné : ce cumul détermine la
+    part de l'énergie injectée qui compense l'énergie prélevée.
+  fields:
+    cumul_kwh:
+      name: Cumul net (kWh)
+      description: Prélèvement − injection depuis le dernier changement de prix. Peut être négatif.
+      required: true
+      example: 812.4
+      selector:
+        number:
+          min: -100000
+          max: 100000
+          step: 0.001
+          mode: box
+          unit_of_measurement: kWh

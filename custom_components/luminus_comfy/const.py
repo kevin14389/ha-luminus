@@ -72,27 +72,28 @@ BUTTON_APPLIQUER_CORRECTION_MANUELLE = "appliquer_correction_manuelle"
 BUTTON_APPLIQUER_CORRECTION_MOIS = "appliquer_correction_mois"
 BUTTON_APPLIQUER_CORRECTION_ANNEE = "appliquer_correction_annee"
 
-# --- Service de saisie/correction de l'historique mensuel ---
+# --- Services ---
 SERVICE_DEFINIR_MOIS_HISTORIQUE = "definir_mois_historique"
 ATTR_MOIS = "mois"
 ATTR_CONSOMMATION_KWH = "consommation_kwh"
 ATTR_PRODUCTION_KWH = "production_kwh"
+SERVICE_DEFINIR_CUMUL_PERIODE = "definir_cumul_periode"
+ATTR_CUMUL_KWH = "cumul_kwh"
 
-# --- Store (accumulateurs persistés, indépendants de la restauration
-# d'état des entités - voir store.py) ---
+# --- Stockage persisté (voir store.py) ---
 STORE_VERSION = 1
-STORE_KEY_ACCUMULATEUR_MOIS = "accumulateur_mois"
-STORE_KEY_ACCUMULATEUR_ANNEE = "accumulateur_annee"
-STORE_KEY_NET_CUMULE_PERIODE = "net_cumule_periode"
-STORE_KEY_MOIS_COURANT = "mois_courant"  # "YYYY-MM" du dernier reset mensuel
-STORE_KEY_ANNEE_COURANTE = "annee_courante"  # "YYYY" du dernier reset annuel
-STORE_KEY_CONSO_MOIS_KWH = "conso_mois_kwh"  # cumul kWh prélevés du mois en cours
-STORE_KEY_INJECTION_MOIS_KWH = "injection_mois_kwh"  # cumul kWh injectés du mois en cours
-STORE_KEY_HISTORIQUE_MENSUEL = "historique_mensuel"  # {"YYYY-MM": {...}}
-STORE_KEY_DERNIERE_CLOTURE = "derniere_cloture"  # "YYYY-MM-DD" du dernier jour clôturé avec succès
+DELAI_SAUVEGARDE_S = 300
 
-# Heure de clôture quotidienne (juste après minuit, lit les totaux exacts
-# du cycle qui vient de se terminer - voir __init__.py)
+# Signal dispatcher : l'état interne ou un tarif a changé, les entités
+# doivent republier leur valeur.
+SIGNAL_MAJ = "luminus_comfy_maj_{}"
+
+# Un compteur source qui redescend sous cette fraction de sa dernière
+# valeur a commencé un nouveau cycle ; une baisse plus faible est du
+# bruit de mesure (même seuil que les statistiques de Home Assistant).
+SEUIL_NOUVEAU_CYCLE = 0.9
+
+# Heure de clôture quotidienne
 DAILY_CLOSEOUT_HOUR = 0
 DAILY_CLOSEOUT_MINUTE = 0
 DAILY_CLOSEOUT_SECOND = 30

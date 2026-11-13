@@ -1,433 +1,88 @@
 """Intégration Luminus Comfy Électricité.
 
-Orchestration : clôture quotidienne (juste après minuit, lit les
-attributs "last_period" des 4 capteurs sources pour une capture exacte
-sans perte - voir le README pour pourquoi), application du changement
-de prix programmé, et vérification de cohérence au démarrage.
+Toute la logique est dans coordinateur.py ; ce fichier ne fait que
+brancher l'intégration sur Home Assistant (chargement, plateformes,
+services).
 """
 
 from __future__ import annotations
 
-import calendar
-import logging
-import re
-from datetime import timedelta
-
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import event as event_helper
-from homeassistant.util import dt as dt_util
 
-from . import calculations as calc
 from .const import (
     ATTR_CONSOMMATION_KWH,
+    ATTR_CUMUL_KWH,
     ATTR_MOIS,
     ATTR_PRODUCTION_KWH,
-    CONF_DELIVERED_OFFPEAK,
-    CONF_DELIVERED_PEAK,
-    CONF_RETURNED_OFFPEAK,
-    CONF_RETURNED_PEAK,
-    DAILY_CLOSEOUT_HOUR,
-    DAILY_CLOSEOUT_MINUTE,
-    DAILY_CLOSEOUT_SECOND,
-    DATETIME_PRIX_ENERGIE_DATE_EFFET,
     DOMAIN,
-    NUM_PRIX_ENERGIE_TTC,
-    NUM_PRIX_ENERGIE_TTC_PROCHAIN,
+    SERVICE_DEFINIR_CUMUL_PERIODE,
     SERVICE_DEFINIR_MOIS_HISTORIQUE,
-    SWITCH_CHANGEMENT_PRIX_PROGRAMME,
 )
-from .store import LuminusStore
-
-_LOGGER = logging.getLogger(__name__)
-_MOIS_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+from .coordinateur import LuminusCoordinateur
 
 PLATFORMS = ["sensor", "number", "switch", "date", "button"]
 
-_SET_MOIS_SCHEMA = vol.Schema(
+_SCHEMA_MOIS = vol.Schema(
     {
         vol.Required(ATTR_MOIS): str,
         vol.Required(ATTR_CONSOMMATION_KWH): vol.Coerce(float),
         vol.Required(ATTR_PRODUCTION_KWH): vol.Coerce(float),
     }
 )
+_SCHEMA_CUMUL = vol.Schema({vol.Required(ATTR_CUMUL_KWH): vol.Coerce(float)})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    store = LuminusStore(hass, entry.entry_id)
-    await store.async_load()
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {"store": store}
+    coordinateur = LuminusCoordinateur(hass, entry)
+    await coordinateur.async_charger()
+    entry.runtime_data = coordinateur
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    coordinateur.async_demarrer()
+    entry.async_on_unload(entry.add_update_listener(_async_options_modifiees))
 
-    async def _on_daily_closeout(_now) -> None:
-        await _async_daily_closeout(hass, entry)
-
-    async def _on_check_prix_programme(_now_or_event) -> None:
-        await _async_check_prix_programme(hass, entry)
-
-    entry.async_on_unload(
-        event_helper.async_track_time_change(
-            hass,
-            _on_daily_closeout,
-            hour=DAILY_CLOSEOUT_HOUR,
-            minute=DAILY_CLOSEOUT_MINUTE,
-            second=DAILY_CLOSEOUT_SECOND,
+    async def _definir_mois(call: ServiceCall) -> None:
+        await _coordinateur(hass).async_definir_mois_historique(
+            call.data[ATTR_MOIS],
+            call.data[ATTR_CONSOMMATION_KWH],
+            call.data[ATTR_PRODUCTION_KWH],
         )
+
+    async def _definir_cumul(call: ServiceCall) -> None:
+        await _coordinateur(hass).async_definir_cumul_periode(call.data[ATTR_CUMUL_KWH])
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_DEFINIR_MOIS_HISTORIQUE, _definir_mois, schema=_SCHEMA_MOIS
     )
-
-    entry.async_on_unload(
-        event_helper.async_track_time_interval(
-            hass,
-            _on_check_prix_programme,
-            timedelta(hours=1),
-        )
+    hass.services.async_register(
+        DOMAIN, SERVICE_DEFINIR_CUMUL_PERIODE, _definir_cumul, schema=_SCHEMA_CUMUL
     )
-
-    tracked_prix_programme = {
-        f"switch.luminus_{SWITCH_CHANGEMENT_PRIX_PROGRAMME}",
-        f"date.luminus_{DATETIME_PRIX_ENERGIE_DATE_EFFET}",
-        f"number.luminus_{NUM_PRIX_ENERGIE_TTC_PROCHAIN}",
-    }
-    entry.async_on_unload(
-        event_helper.async_track_state_change_event(
-            hass,
-            list(tracked_prix_programme),
-            _on_check_prix_programme,
-        )
-    )
-
-    # Vérifications de rattrapage au démarrage/ajout de l'intégration :
-    # une clôture quotidienne manquée (HA éteint/en redémarrage pile au
-    # passage de minuit - l'intégration ne peut rattraper que le DERNIER
-    # jour manqué, puisque "last_period" ne garde qu'un seul cycle
-    # précédent), un changement de prix qui aurait dû s'appliquer pendant
-    # que HA était éteint, et un contrôle de cohérence des accumulateurs
-    # (voir le README : un incident après mise à jour HA les a déjà remis
-    # à 0 sans prévenir à 2 reprises).
-    async def _startup(_event=None) -> None:
-        await _async_rattraper_cloture_manquante(hass, entry)
-        await _async_check_prix_programme(hass, entry)
-        await _async_verifier_accumulateurs(hass, entry)
-
-    if hass.is_running:
-        hass.async_create_task(_startup())
-    else:
-        entry.async_on_unload(
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _startup)
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_DEFINIR_MOIS_HISTORIQUE):
-        async def _handle_definir_mois(call: ServiceCall) -> None:
-            await _async_definir_mois_historique(hass, entry, call)
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_DEFINIR_MOIS_HISTORIQUE,
-            _handle_definir_mois,
-            schema=_SET_MOIS_SCHEMA,
-        )
-
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        if not hass.data[DOMAIN]:
-            hass.services.async_remove(DOMAIN, SERVICE_DEFINIR_MOIS_HISTORIQUE)
+        hass.services.async_remove(DOMAIN, SERVICE_DEFINIR_MOIS_HISTORIQUE)
+        hass.services.async_remove(DOMAIN, SERVICE_DEFINIR_CUMUL_PERIODE)
+        # Écrit tout de suite ce qui attendait une sauvegarde différée,
+        # avant qu'un rechargement ne relise le fichier.
+        await entry.runtime_data.store.async_save()
     return unloaded
 
 
-def _attr_last_period_or_current(hass: HomeAssistant, entity_id: str | None) -> float:
-    """Valeur exacte du cycle qui vient de se terminer (attribut
-    last_period des utility_meter) - évite de perdre les dernières
-    minutes avant minuit comme un simple snapshot à 23h55 le ferait.
-    Retombe sur l'état courant si l'attribut est absent."""
-    if not entity_id:
-        return 0.0
-    state = hass.states.get(entity_id)
-    if state is None:
-        return 0.0
-    last_period = state.attributes.get("last_period")
-    if last_period is not None:
-        try:
-            return float(last_period)
-        except (TypeError, ValueError):
-            pass
-    try:
-        return float(state.state)
-    except (TypeError, ValueError):
-        return 0.0
+async def _async_options_modifiees(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Les capteurs sources ont été changés via "Configurer"."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def _async_notify(hass: HomeAssistant, title: str, message: str, notification_id: str) -> None:
-    await hass.services.async_call(
-        "persistent_notification",
-        "create",
-        {"title": title, "message": message, "notification_id": notification_id},
-        blocking=True,
-    )
-
-
-async def _async_rattraper_cloture_manquante(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Si HA était éteint (ou l'intégration en cours de rechargement)
-    pile au passage de minuit, le déclencheur horaire de
-    _async_daily_closeout ne se déclenche pas et ce jour-là n'est jamais
-    crédité aux accumulateurs - sans rattrapage, il est perdu
-    définitivement. Détecte ce cas au démarrage et relance la clôture
-    pour le jour manqué. Ne peut rattraper qu'un seul jour manqué (le
-    plus récent) : "last_period" sur les capteurs sources ne conserve
-    qu'un seul cycle précédent, pas un historique complet."""
-    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
-    today = dt_util.now().date()
-    hier = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-    mois_str = today.strftime("%Y-%m")
-
-    if not store.derniere_cloture:
-        # derniere_cloture vide : soit vraie première utilisation (rien à
-        # rattraper), soit la clôture n'a jamais pu tourner malgré un
-        # usage réel (ex. bug des callbacks non-coroutines corrigé en
-        # 1.3.1 - le champ n'a alors jamais été écrit). On distingue les
-        # deux cas via mois_courant : s'il est resté bloqué sur un mois
-        # déjà passé, la clôture est bien bloquée depuis un moment, pas
-        # juste jamais encore lancée.
-        if not store.mois_courant or store.mois_courant == mois_str:
-            return
-    elif store.derniere_cloture == hier:
-        return
-    _LOGGER.warning(
-        "Luminus Comfy : clôture manquante détectée au démarrage (dernière "
-        "clôture %s, hier était %s) - rattrapage du jour le plus récent.",
-        store.derniere_cloture,
-        hier,
-    )
-    await _async_daily_closeout(hass, entry)
-
-
-async def _async_daily_closeout(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    conf = {**entry.data, **entry.options}
-    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
-
-    prelevement_hier = _attr_last_period_or_current(
-        hass, conf.get(CONF_DELIVERED_PEAK)
-    ) + _attr_last_period_or_current(hass, conf.get(CONF_DELIVERED_OFFPEAK))
-    injection_hier = _attr_last_period_or_current(
-        hass, conf.get(CONF_RETURNED_PEAK)
-    ) + _attr_last_period_or_current(hass, conf.get(CONF_RETURNED_OFFPEAK))
-
-    cumule_avant = store.net_cumule_periode
-    cumule_apres, net_fact = calc.net_facturable(cumule_avant, prelevement_hier - injection_hier)
-
-    prix_et = calc.prix_energie_taxes_ttc(hass) / 100
-    prix_rs = calc.prix_reseau_ttc(hass) / 100
-    cout_fixe = calc.cout_fixe_journalier(hass)
-    cout_variable_hier = (net_fact * prix_et) + (prelevement_hier * prix_rs)
-    cout_total_hier = round(cout_variable_hier + cout_fixe, 4)
-
-    await store.async_set_net_cumule_periode(cumule_apres)
-    # Crédite le jour qui vient de se terminer AVANT de vérifier un
-    # éventuel changement de mois/année, pour qu'il compte dans la
-    # bonne période (voir ordre équivalent dans le package YAML d'origine).
-    await store.async_ajouter_kwh_mois(prelevement_hier, injection_hier)
-    await store.async_ajouter_cout_mois(cout_total_hier)
-    await store.async_ajouter_cout_annee(cout_total_hier)
-    await store.async_set_derniere_cloture(
-        (dt_util.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    )
-
-    today = dt_util.now().date()
-    mois_str = today.strftime("%Y-%m")
-    annee_str = today.strftime("%Y")
-    if store.mois_courant != mois_str:
-        # Archive le mois qui vient de se terminer (totaux kWh + coût
-        # réel déjà accumulé jour par jour, donc toujours exact même si
-        # le prix a changé en cours de mois) avant de le remettre à 0.
-        await _async_archiver_mois_auto(hass, entry, store.mois_courant)
-        await store.async_reset_mois(mois_str)
-        await store.async_reset_kwh_mois()
-    if store.annee_courante != annee_str:
-        await store.async_reset_annee(annee_str)
-
-    date_hier = (dt_util.now() - timedelta(days=1)).strftime("%d/%m/%Y")
-    await _async_notify(
-        hass,
-        f"Coût électricité Luminus - {date_hier}",
-        (
-            f"Prélèvement : {round(prelevement_hier, 3)} kWh — "
-            f"Injection : {round(injection_hier, 3)} kWh — "
-            f"Cumul de période : {round(cumule_apres, 3)} kWh\n\n"
-            f"Coût total du jour : {cout_total_hier} €"
-        ),
-        "luminus_resume_quotidien",
-    )
-
-
-async def _async_archiver_mois_auto(hass: HomeAssistant, entry: ConfigEntry, mois: str) -> None:
-    """Archive le mois qui vient de se terminer dans l'historique, sauf
-    s'il a déjà été saisi manuellement (service definir_mois_historique)
-    - une saisie manuelle n'est jamais écrasée automatiquement."""
-    if not mois:
-        return
-    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
-    existant = store.historique_mois(mois)
-    if existant is not None and existant.get("source") == "manuel":
-        return
-
-    conso = store.conso_mois_kwh
-    injection = store.injection_mois_kwh
-    # Le coût est déjà exact (accumulé jour par jour, donc correct même
-    # si le prix a changé en cours de mois) - pas besoin de le
-    # recalculer depuis les tarifs courants comme le fait resume_mois
-    # pour une saisie manuelle sans détail journalier.
-    cout_total_eur = store.accumulateur_mois
-    prix_moyen = round(cout_total_eur / conso, 4) if conso else 0.0
-
-    await store.async_set_historique_mois(
-        mois,
-        {
-            "consommation_kwh": round(conso, 3),
-            "production_kwh": round(injection, 3),
-            "solde_net_kwh": round(conso - injection, 3),
-            "cout_total_eur": round(cout_total_eur, 2),
-            "prix_moyen_kwh": prix_moyen,
-            "prix_energie_taxes_ttc": calc.prix_energie_taxes_ttc(hass),
-            "prix_reseau_ttc": calc.prix_reseau_ttc(hass),
-            "source": "auto",
-        },
-    )
-
-
-async def _async_check_prix_programme(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    if not calc.get_switch_on(hass, SWITCH_CHANGEMENT_PRIX_PROGRAMME):
-        return
-    date_effet = calc.get_date(hass, DATETIME_PRIX_ENERGIE_DATE_EFFET)
-    if date_effet is None or dt_util.now().date() < date_effet:
-        return
-    prochain = calc.get_number(hass, NUM_PRIX_ENERGIE_TTC_PROCHAIN)
-    if prochain <= 0:
-        return
-
-    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
-
-    await _async_notify(
-        hass,
-        "Luminus - Nouveau prix appliqué",
-        (
-            f"Le prix énergie programmé ({prochain} c€/kWh) vient d'être "
-            "appliqué. S'il aurait dû entrer en vigueur avant aujourd'hui, "
-            "utilise la correction manuelle pour rattraper les jours concernés."
-        ),
-        "luminus_changement_prix_applique",
-    )
-
-    await hass.services.async_call(
-        "number",
-        "set_value",
-        {"entity_id": f"number.luminus_{NUM_PRIX_ENERGIE_TTC}", "value": prochain},
-        blocking=True,
-    )
-    await hass.services.async_call(
-        "switch",
-        "turn_off",
-        {"entity_id": f"switch.luminus_{SWITCH_CHANGEMENT_PRIX_PROGRAMME}"},
-        blocking=True,
-    )
-    await hass.services.async_call(
-        "number",
-        "set_value",
-        {"entity_id": f"number.luminus_{NUM_PRIX_ENERGIE_TTC_PROCHAIN}", "value": 0},
-        blocking=True,
-    )
-    await store.async_reset_net_cumule_periode()
-
-
-async def _async_verifier_accumulateurs(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
-    today = dt_util.now().date()
-    suspect_mois = today.day > 2 and store.accumulateur_mois == 0
-    suspect_annee = today.timetuple().tm_yday > 2 and store.accumulateur_annee == 0
-    if not (suspect_mois or suspect_annee):
-        return
-    await _async_notify(
-        hass,
-        "⚠️ Luminus - Accumulateur suspect à 0",
-        (
-            f"Au démarrage, un accumulateur est à 0 alors qu'on n'est pas en "
-            f"tout début de mois/d'année (accumulateur_mois = "
-            f"{store.accumulateur_mois} €, accumulateur_annee = "
-            f"{store.accumulateur_annee} €). Vérifie si c'est légitime ou "
-            "une perte de données."
-        ),
-        "luminus_accumulateur_suspect",
-    )
-
-
-def _mois_precedent(mois: str) -> str:
-    annee, mois_num = (int(p) for p in mois.split("-"))
-    if mois_num == 1:
-        return f"{annee - 1}-12"
-    return f"{annee}-{mois_num - 1:02d}"
-
-
-async def _async_definir_mois_historique(
-    hass: HomeAssistant, entry: ConfigEntry, call: ServiceCall
-) -> None:
-    """Service definir_mois_historique : saisie/correction manuelle d'un
-    mois (ex. import depuis MyOres). Calcule coût, prix moyen et solde
-    net automatiquement à partir des tarifs actuellement configurés -
-    voir calculations.resume_mois.
-
-    Enchaîne le cumul de période avec le mois précédemment importé (son
-    "cumule_periode_apres" dans l'historique) pour que le plafonnement à
-    0 du net facturable se fasse sur l'ensemble de la période tarifaire,
-    pas mois par mois isolément - d'où l'obligation d'importer les mois
-    dans l'ordre chronologique, sous peine de fausser le cumul."""
-    mois: str = call.data[ATTR_MOIS]
-    if not _MOIS_RE.match(mois):
-        raise ServiceValidationError(
-            f"Format de mois invalide : {mois!r} (attendu AAAA-MM, ex. 2026-01)"
-        )
-    consommation_kwh = call.data[ATTR_CONSOMMATION_KWH]
-    production_kwh = call.data[ATTR_PRODUCTION_KWH]
-    if consommation_kwh < 0 or production_kwh < 0:
-        raise ServiceValidationError("La consommation et la production doivent être >= 0.")
-
-    store: LuminusStore = hass.data[DOMAIN][entry.entry_id]["store"]
-
-    annee, mois_num = (int(p) for p in mois.split("-"))
-    jours_du_mois = calendar.monthrange(annee, mois_num)[1]
-
-    precedent = store.historique_mois(_mois_precedent(mois))
-    net_cumule_avant = precedent.get("cumule_periode_apres", 0.0) if precedent else 0.0
-
-    cumule_apres, resume = calc.resume_mois(
-        consommation_kwh,
-        production_kwh,
-        calc.prix_energie_taxes_ttc(hass),
-        calc.prix_reseau_ttc(hass),
-        calc.cout_fixe_journalier(hass),
-        jours_du_mois,
-        net_cumule_avant,
-    )
-    resume["source"] = "manuel"
-
-    await store.async_set_historique_mois(mois, resume)
-    await _async_notify(
-        hass,
-        f"Luminus - Mois {mois} enregistré",
-        (
-            f"Consommation : {resume['consommation_kwh']} kWh — "
-            f"Production : {resume['production_kwh']} kWh\n"
-            f"Coût total : {resume['cout_total_eur']} € — "
-            f"Prix moyen : {resume['prix_moyen_kwh']} €/kWh"
-        ),
-        f"luminus_mois_{mois}",
-    )
+def _coordinateur(hass: HomeAssistant) -> LuminusCoordinateur:
+    """L'intégration n'accepte qu'une seule entrée de configuration."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.state is ConfigEntryState.LOADED:
+            return entry.runtime_data
+    raise ServiceValidationError("L'intégration Luminus Comfy n'est pas chargée.")

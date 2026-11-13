@@ -1,16 +1,17 @@
 """Calculs de prix et de coût - portage fidèle des formules Jinja du
 package YAML d'origine (déjà validées avec un vrai décompte Luminus et
-plusieurs allers-retours de vérification). Fonctions pures : lisent les
-états actuels (hass.states) et le cumul de période (passé en argument,
-issu du Store persisté), ne gardent aucun état interne - pas de risque
-de décalage entre capteurs comme avec les templates HA chaînés.
+plusieurs allers-retours de vérification).
+
+Fonctions pures : tout ce dont elles ont besoin est passé en argument
+(les tarifs dans un dictionnaire clé -> valeur, la date du jour, les
+kWh), elles ne lisent ni Home Assistant ni le stockage.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
-
-from homeassistant.core import HomeAssistant
+from typing import Any
 
 from .const import (
     DATETIME_DATE_DEBUT_CONTRAT,
@@ -30,126 +31,71 @@ from .const import (
     SWITCH_REMISE_FIDELITE_ACTIVE,
 )
 
-_UNAVAILABLE = ("unknown", "unavailable", None)
+Valeurs = Mapping[str, Any]
 
 
-def get_number(hass: HomeAssistant, key: str, default: float = 0.0) -> float:
-    state = hass.states.get(f"number.luminus_{key}")
-    if state is None or state.state in _UNAVAILABLE:
-        return default
-    try:
-        return float(state.state)
-    except ValueError:
-        return default
+def _nombre(valeurs: Valeurs, key: str) -> float:
+    return float(valeurs.get(key) or 0.0)
 
 
-def get_switch_on(hass: HomeAssistant, key: str) -> bool:
-    state = hass.states.get(f"switch.luminus_{key}")
-    return state is not None and state.state == "on"
-
-
-def get_date(hass: HomeAssistant, key: str) -> date | None:
-    state = hass.states.get(f"date.luminus_{key}")
-    if state is None or state.state in _UNAVAILABLE:
-        return None
-    try:
-        return date.fromisoformat(state.state)
-    except ValueError:
-        return None
-
-
-def get_source_value(hass: HomeAssistant, entity_id: str | None) -> float:
-    if not entity_id:
-        return 0.0
-    state = hass.states.get(entity_id)
-    if state is None or state.state in _UNAVAILABLE:
-        return 0.0
-    try:
-        return float(state.state)
-    except ValueError:
-        return 0.0
-
-
-def prelevement_total(hass: HomeAssistant, delivered_peak: str, delivered_offpeak: str) -> float:
-    """Prélèvement réseau total (jour+nuit additionnés)."""
-    return round(
-        get_source_value(hass, delivered_peak) + get_source_value(hass, delivered_offpeak), 3
-    )
-
-
-def injection_totale(hass: HomeAssistant, returned_peak: str, returned_offpeak: str) -> float:
-    """Injection réseau totale (jour+nuit additionnées)."""
-    return round(
-        get_source_value(hass, returned_peak) + get_source_value(hass, returned_offpeak), 3
-    )
-
-
-def prix_energie_taxes_ttc(hass: HomeAssistant) -> float:
+def prix_energie_taxes_ttc(valeurs: Valeurs, aujourdhui: date) -> float:
     """c€/kWh, HTVA->TTC. S'applique au prélèvement NET (voir
-    cout_variable_jour), pas au brut."""
-    tva = get_number(hass, NUM_TAUX_TVA)
-    energie_ttc = get_number(hass, NUM_PRIX_ENERGIE_TTC)
-    energie_ht = energie_ttc / (1 + tva / 100) if (1 + tva / 100) else 0.0
+    cout_variable), pas au brut."""
+    tva = _nombre(valeurs, NUM_TAUX_TVA)
+    energie_ht = _nombre(valeurs, NUM_PRIX_ENERGIE_TTC) / (1 + tva / 100)
 
     remise_domiciliation = 0.0
-    if get_switch_on(hass, SWITCH_REMISE_FIDELITE_ACTIVE):
-        debut = get_date(hass, DATETIME_DATE_DEBUT_CONTRAT)
+    if valeurs.get(SWITCH_REMISE_FIDELITE_ACTIVE):
+        debut = valeurs.get(DATETIME_DATE_DEBUT_CONTRAT)
         if debut is not None:
-            jours = (date.today() - debut).days
-            mois = jours / 30.44
-            r24 = get_number(hass, NUM_REMISE_FIDELITE_24_MOIS)
-            r12 = get_number(hass, NUM_REMISE_FIDELITE_12_MOIS)
+            mois = (aujourdhui - debut).days / 30.44
             if mois >= 24:
-                energie_ht *= 1 - r24 / 100
+                energie_ht *= 1 - _nombre(valeurs, NUM_REMISE_FIDELITE_24_MOIS) / 100
             elif mois >= 12:
-                energie_ht *= 1 - r12 / 100
-        # Remise fixe par kWh net, distincte du pourcentage ci-dessus,
-        # conditionnée à la même domiciliation (0 par défaut : n'a
-        # d'effet que si explicitement configurée - voir le README pour
-        # le risque de double comptage avec la remise en %).
-        remise_domiciliation = get_number(hass, NUM_REMISE_FIDELITE_DOMICILIATION)
+                energie_ht *= 1 - _nombre(valeurs, NUM_REMISE_FIDELITE_12_MOIS) / 100
+        # Remise fixe par kWh net : une ligne distincte du pourcentage
+        # sur le décompte, les deux s'additionnent.
+        remise_domiciliation = _nombre(valeurs, NUM_REMISE_FIDELITE_DOMICILIATION)
 
-    energie_verte = get_number(hass, NUM_COUT_ENERGIE_VERTE)
-    accise = get_number(hass, NUM_TAXE_ACCISE_SPECIAL)
-    cotisation = get_number(hass, NUM_TAXE_COTISATION_ENERGIE)
-    raccordement = get_number(hass, NUM_TAXE_REDEVANCE_RACCORDEMENT)
-
-    total_ht = energie_ht + energie_verte + accise + cotisation + raccordement - remise_domiciliation
+    total_ht = (
+        energie_ht
+        + _nombre(valeurs, NUM_COUT_ENERGIE_VERTE)
+        + _nombre(valeurs, NUM_TAXE_ACCISE_SPECIAL)
+        + _nombre(valeurs, NUM_TAXE_COTISATION_ENERGIE)
+        + _nombre(valeurs, NUM_TAXE_REDEVANCE_RACCORDEMENT)
+        - remise_domiciliation
+    )
     return round(total_ht * (1 + tva / 100), 4)
 
 
-def prix_reseau_ttc(hass: HomeAssistant) -> float:
+def prix_reseau_ttc(valeurs: Valeurs) -> float:
     """c€/kWh, HTVA->TTC. S'applique au prélèvement BRUT, jamais réduit
     par l'injection."""
-    tva = get_number(hass, NUM_TAUX_TVA)
-    reseau = get_number(hass, NUM_ORES_COUT_RESEAU_VARIABLE)
-    return round(reseau * (1 + tva / 100), 4)
+    tva = _nombre(valeurs, NUM_TAUX_TVA)
+    return round(_nombre(valeurs, NUM_ORES_COUT_RESEAU_VARIABLE) * (1 + tva / 100), 4)
 
 
-def cout_fixe_journalier(hass: HomeAssistant) -> float:
+def cout_fixe_journalier(valeurs: Valeurs) -> float:
     """EUR/jour : redevance Luminus (déjà TTC) + terme fixe GRD (HTVA->TTC),
-    divisés par 365, moins le crédit ristorno journalier (TTC, 0 par
-    défaut - n'a d'effet que si explicitement configuré, voir le
-    README)."""
-    tva = get_number(hass, NUM_TAUX_TVA)
-    redevance_ttc = get_number(hass, NUM_REDEVANCE_FIXE_ANNUELLE)
-    grd = get_number(hass, NUM_ORES_TERME_FIXE_GRD)
-    grd_ttc = grd * (1 + tva / 100)
-    ristorno_ttc = get_number(hass, NUM_RISTORNO_CREDIT_JOURNALIER)
-    return round((redevance_ttc + grd_ttc) / 365 - ristorno_ttc, 4)
+    divisés par 365, moins le crédit ristorno journalier (TTC)."""
+    tva = _nombre(valeurs, NUM_TAUX_TVA)
+    grd_ttc = _nombre(valeurs, NUM_ORES_TERME_FIXE_GRD) * (1 + tva / 100)
+    annuel = _nombre(valeurs, NUM_REDEVANCE_FIXE_ANNUELLE) + grd_ttc
+    return round(annuel / 365 - _nombre(valeurs, NUM_RISTORNO_CREDIT_JOURNALIER), 4)
 
 
-def net_facturable(net_cumule_avant: float, delta_net_du_jour: float) -> tuple[float, float]:
+def net_facturable(net_cumule_avant: float, delta_net: float) -> tuple[float, float]:
     """Méthode "waterfall" sur le cumul de la période tarifaire : ne
     facture que la portion qui fait dépasser le cumul au-dessus de 0.
-    Retourne (cumule_apres, net_facturable_aujourdhui)."""
-    cumule_apres = net_cumule_avant + delta_net_du_jour
+    Retourne (cumule_apres, net_facturable)."""
+    cumule_apres = net_cumule_avant + delta_net
     facturable = max(cumule_apres, 0) - max(net_cumule_avant, 0)
     return cumule_apres, facturable
 
 
 def cout_variable(
-    hass: HomeAssistant,
+    valeurs: Valeurs,
+    aujourdhui: date,
     prelevement: float,
     injection: float,
     net_cumule_avant: float,
@@ -157,9 +103,10 @@ def cout_variable(
     """Retourne (cumule_apres, cout_variable_eur). Énergie+taxes sur le
     net facturable (waterfall), réseau toujours sur le brut en entier."""
     cumule_apres, facturable = net_facturable(net_cumule_avant, prelevement - injection)
-    prix_et = prix_energie_taxes_ttc(hass) / 100
-    prix_rs = prix_reseau_ttc(hass) / 100
-    cout = (facturable * prix_et) + (prelevement * prix_rs)
+    cout = (
+        facturable * prix_energie_taxes_ttc(valeurs, aujourdhui)
+        + prelevement * prix_reseau_ttc(valeurs)
+    ) / 100
     return cumule_apres, round(cout, 4)
 
 
@@ -177,34 +124,28 @@ def resume_mois(
     importer un historique (ex. MyOres).
 
     Enchaîne avec le cumul de la période tarifaire (net_cumule_avant,
-    venant du mois précédemment importé - voir __init__.py) exactement
-    comme le fait le suivi quotidien en direct : un mois très négatif
-    (grosse injection) compense les mois précédents de la MÊME période
-    tarifaire au lieu d'être plafonné isolément à 0. Sans ça, une suite
-    de mois d'été très producteurs serait chacun compté à 0 € d'énergie
-    au lieu de se soustraire du cumul des mois d'hiver, ce qui gonflait
-    artificiellement le total (bug réel détecté sur un cas concret : un
-    import traité mois par mois donnait 3206€ au lieu de ~2862€ pour la
-    même période, parce que chaque mois d'été à net négatif perdait son
-    crédit au lieu de le reporter sur les mois précédents).
+    venant du mois précédent) exactement comme le fait le suivi
+    quotidien : un mois très négatif (grosse injection) compense les
+    mois précédents de la MÊME période tarifaire au lieu d'être plafonné
+    isolément à 0. Traiter chaque mois isolément gonflait le total (cas
+    réel : 3206 € au lieu de ~2862 € sur neuf mois).
 
-    Retourne (cumule_apres, résumé) : cumule_apres doit être passé comme
-    net_cumule_avant du mois suivant pour que la chaîne reste correcte -
-    d'où l'obligation d'importer les mois dans l'ordre chronologique."""
-    cumule_apres, net_facturable_kwh = net_facturable(net_cumule_avant, consommation_kwh - production_kwh)
-    cout_variable_eur = (net_facturable_kwh * prix_energie_taxes_ttc_c / 100) + (
-        consommation_kwh * prix_reseau_ttc_c / 100
+    Retourne (cumule_apres, résumé) : cumule_apres sert de
+    net_cumule_avant au mois suivant, d'où l'obligation d'importer les
+    mois dans l'ordre chronologique."""
+    cumule_apres, net_facturable_kwh = net_facturable(
+        net_cumule_avant, consommation_kwh - production_kwh
     )
-    cout_fixe_eur = cout_fixe_journalier_eur * jours_du_mois
-    cout_total_eur = round(cout_variable_eur + cout_fixe_eur, 2)
-    solde_net_kwh = round(consommation_kwh - production_kwh, 3)
-    prix_moyen_kwh = round(cout_total_eur / consommation_kwh, 4) if consommation_kwh else 0.0
+    cout_variable_eur = (
+        net_facturable_kwh * prix_energie_taxes_ttc_c + consommation_kwh * prix_reseau_ttc_c
+    ) / 100
+    cout_total_eur = round(cout_variable_eur + cout_fixe_journalier_eur * jours_du_mois, 2)
     resume = {
         "consommation_kwh": round(consommation_kwh, 3),
         "production_kwh": round(production_kwh, 3),
-        "solde_net_kwh": solde_net_kwh,
+        "solde_net_kwh": round(consommation_kwh - production_kwh, 3),
         "cout_total_eur": cout_total_eur,
-        "prix_moyen_kwh": prix_moyen_kwh,
+        "prix_moyen_kwh": round(cout_total_eur / consommation_kwh, 4) if consommation_kwh else 0.0,
         "prix_energie_taxes_ttc": prix_energie_taxes_ttc_c,
         "prix_reseau_ttc": prix_reseau_ttc_c,
         "cumule_periode_apres": round(cumule_apres, 3),
